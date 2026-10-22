@@ -76,7 +76,7 @@ spec:
                 --host 127.0.0.1 --port 8000 \
                 --tensor-parallel-size "$TP_DEGREE" --max-model-len "$MAX_MODEL_LEN" \
                 --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
-                --num-gpu-blocks-override "$NUM_GPU_BLOCKS" --limit-mm-per-prompt '{"image": 1, "video": 1}' --no-enable-prefix-caching \
+                --num-gpu-blocks-override "$NUM_GPU_BLOCKS" --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
                 --additional-config "$ADDITIONAL_CONFIG" > >(tee /tmp/vllm_server.log) 2>&1 &
               SERVER=$!
