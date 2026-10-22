@@ -121,6 +121,9 @@ spec:
             # See https://awsdocs-neuron.readthedocs-hosted.com/en/latest/inference-native-pytorch.html
             - name: VLLM_NEURON_BACKEND
               value: "neuron_native"
+            # print the real cause when a kernel fails during tracing (else it is hidden)
+            - name: TORCHDYNAMO_VERBOSE
+              value: "1"
             - name: REPO_URL
               value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
             - name: BRANCH
