@@ -54,7 +54,14 @@ with torch.no_grad():
                       do_sample=False)[0, len(prompt):].tolist()
 print("HF reference:", ref)
 
-from vllm import LLM, SamplingParams  # noqa: E402
+from vllm import LLM, ModelRegistry, SamplingParams  # noqa: E402
+
+import muse_glimmer_vllm  # noqa: E402
+
+muse_glimmer_vllm.register()
+_reg = getattr(ModelRegistry, "models", {}).get(muse_glimmer_vllm.ARCH)
+print("registered class for", muse_glimmer_vllm.ARCH, "->", getattr(_reg, "module_name", _reg),
+      getattr(_reg, "class_name", ""))
 
 ok = True
 for tp in args.tp:
