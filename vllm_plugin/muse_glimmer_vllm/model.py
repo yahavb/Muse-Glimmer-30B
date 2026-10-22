@@ -362,8 +362,15 @@ class MuseGlimmerForCausalLM(nn.Module):
             # Built on CPU (the runner builds the model under the meta device): its
             # non-persistent buffers (vision RoPE inv_freq) must hold real values.
             # Replicated on every rank, like the validated one-core vision run.
+            # Vision modules get the config as transformers loads it from the checkpoint, like
+            # the bring-up: vLLM's config loader keeps vision rope_type "default", which the HF
+            # vision RoPE rejects (it needs "axial", set by transformers' own loader).
+            from transformers import AutoConfig
+            from vllm.config import get_current_vllm_config
+
+            tf_config = AutoConfig.from_pretrained(get_current_vllm_config().model_config.model)
             with torch.device("cpu"):
-                self.visual = MuseGlimmerVisionEncoder(hf_config).to(config.torch_dtype)
+                self.visual = MuseGlimmerVisionEncoder(tf_config).to(config.torch_dtype)
                 self._vision_meta = precompute_vision_kwargs(self.visual.tower, torch.tensor([IMAGE_GRID]))
         self.tp_group = get_tp_group()
         self.world_size = self.tp_group.world_size
