@@ -1,0 +1,8 @@
+[
+  {"id": "count_red_circles", "image": "shapes.png",
+   "prompt": "How many red circles are in this image? Answer with a number.", "expect": ["3", "three"]},
+  {"id": "read_word", "image": "word.png",
+   "prompt": "What word is written in this image?", "expect": ["trainium"]},
+  {"id": "main_color", "image": "green.png",
+   "prompt": "What color is the square in this image? Answer with one word.", "expect": ["green"]}
+]

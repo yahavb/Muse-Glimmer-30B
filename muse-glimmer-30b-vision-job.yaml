@@ -1,0 +1,144 @@
+# Muse-Glimmer-30B IMAGE-prompt ladder on trn3 (TorchNeuron). Separate from the
+# text job (muse-glimmer-30b-job.yaml), which stays as-is for R1/R2.
+#
+# Rungs (same image, prompt, greedy, 256 tokens, TP=2, m-lnc2):
+#   R3  eager                                   (baseline with image)
+#   R4  compile text decoder, vision tower eager
+#   R5  compile text decoder + vision tower, all fullgraph=True
+# Checks: R5 prints VISION CHECK (fullgraph vs stock eager features, same image);
+# every rung answers eval_images/cases.json (PASS/FAIL); at the end the job
+# prints how many tokens R4/R5 share with R3 before the first difference.
+# Each rung runs in its own torchrun (fresh process, own warmup) and is tagged
+# "████ RUNG Rn" in the log.
+#
+# Launch:
+#   kubectl create configmap muse-glimmer-code --from-file=run_muse_glimmer.py --from-file=muse_compile.py \
+#     --from-file=eval_images/ --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl delete job muse-glimmer-30b-vision --ignore-not-found
+#   kubectl apply -f muse-glimmer-30b-vision-job.yaml
+#   kubectl logs job/muse-glimmer-30b-vision > /tmp/muse-glimmer-30b-vision
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: muse-glimmer-30b-vision
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-vision
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-type: trn3-dev1
+      resourceClaims:
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
+      containers:
+        - name: inference
+          image: public.ecr.aws/neuron/torch-neuronx:2.14.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-ec"
+            - |
+              set -euo pipefail
+              python3 -m pip install -q -U "transformers>=5.20" accelerate pillow
+              # image processor needs torchvision; pin to the image's torch 2.14.0 and
+              # --no-deps so pip can't swap torch (breaks the torch_neuronx ABI).
+              python3 -m pip install -q --no-deps torchvision==0.29.0
+              python3 -c 'import torch, torchvision, torch_neuronx, transformers; print("torch", torch.__version__, "torchvision", torchvision.__version__, "torch_neuronx", torch_neuronx.__version__, "transformers", transformers.__version__)'
+              echo "PROVENANCE code sha256:"; sha256sum /code/*.py /code/*.json /code/*.png
+
+              # /var/mdl (PVC) has no rename/lock support -> HF hub cache breaks there.
+              # Keep caches on local disk; download once before torchrun so ranks don't race.
+              export HF_HOME=/tmp/hf_cache
+              export NEURON_COMPILE_CACHE_URL=/tmp/neuron-compile-cache
+              mkdir -p "$HF_HOME" "$NEURON_COMPILE_CACHE_URL"
+              python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))'
+
+              for RUNG in $RUNGS; do
+                case "$RUNG" in
+                  R3) FLAGS="" ;;
+                  R4) FLAGS="--compile --vision eager" ;;
+                  R5) FLAGS="--compile --vision compile" ;;
+                  *) echo "unknown rung $RUNG"; exit 1 ;;
+                esac
+                echo "████ RUNG $RUNG  flags: $FLAGS ████"
+                torchrun --nproc_per_node="$TP_DEGREE" --master_port=29500 \
+                  /code/run_muse_glimmer.py --tp $FLAGS --image "$IMAGE_URL" --image-size "$IMAGE_SIZE" \
+                  --cases /code/cases.json --max-new-tokens "$MAX_NEW_TOKENS" 2>&1 | tee "/tmp/rung_$RUNG.txt" \
+                  || echo "████ RUNG $RUNG FAILED ████"
+                echo "████ RUNG $RUNG DONE ████"
+              done
+              echo "════════ TOKEN MATCH vs R3 (main image, greedy) ════════"
+              python3 - <<'PY'
+              import ast, glob, re
+              toks = {}
+              for f in sorted(glob.glob("/tmp/rung_R*.txt")):
+                  m = re.findall(r"^MAIN_TOKENS: (\[.*\])$", open(f).read(), re.M)
+                  if m:
+                      toks[re.search(r"rung_(R\d)", f).group(1)] = ast.literal_eval(m[-1])
+              ref = toks.get("R3")
+              for r, t in toks.items():
+                  if ref is None or r == "R3":
+                      continue
+                  n = next((i for i, (a, b) in enumerate(zip(ref, t)) if a != b), min(len(ref), len(t)))
+                  print(f"TOKEN MATCH {r} vs R3: first {n}/{len(ref)} tokens identical")
+              if ref is None:
+                  print("TOKEN MATCH: no R3 tokens found")
+              PY
+              grep -H "^CASES:\|^VISION CHECK" /tmp/rung_R*.txt || true
+              echo "════════ RUN DONE ════════"
+          resources:
+            claims:
+              - name: m-lnc2
+            requests:
+              cpu: 22
+              memory: 220Gi
+              ephemeral-storage: 120Gi
+            limits:
+              cpu: 44
+              memory: 400Gi
+              ephemeral-storage: 200Gi
+          volumeMounts:
+            - name: code
+              mountPath: /code
+            - name: dshm
+              mountPath: /dev/shm
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: NEURON_RT_LOG_LEVEL
+              value: "ERROR"
+            - name: NEURON_CC_LOG_LEVEL
+              value: "ERROR"
+            - name: TORCH_NEURONX_LOG_LEVEL
+              value: "ERROR"
+            - name: NEURON_CC_FLAGS
+              value: "--model-type=transformer"
+            - name: TP_DEGREE
+              value: "2"
+            # space-separated subset of: R3 R4 R5
+            - name: RUNGS
+              value: "R3 R4 R5"
+            - name: IMAGE_URL
+              value: "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg"
+            - name: IMAGE_SIZE
+              value: "448"
+            - name: MAX_NEW_TOKENS
+              value: "256"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+      volumes:
+        - name: code
+          configMap:
+            name: muse-glimmer-code
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi

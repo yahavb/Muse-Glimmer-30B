@@ -1,0 +1,167 @@
+# Muse-Glimmer-30B VIDEO job on trn3 (TorchNeuron): correctness rungs + vision-path profile.
+# The pod clones https://github.com/yahavb/Muse-Glimmer-30B (code, eval images, video) —
+# no ConfigMaps. Push before you apply: the cluster runs the branch, not your laptop.
+#
+# 1. Rungs (same video, prompt, greedy, 256 tokens, TP=2, m-lnc2), RUNGS = subset of:
+#      V3  eager
+#      V4  compile text decoder, vision tower eager
+#      V5  compile text decoder + vision tower, all fullgraph=True   (default: correctness gate)
+# 2. PROFILE_VISION=1: scripts/neuron/profile_vision_job.sh — vision tower alone on ONE core
+#    (TP=1, no collectives): warmup -> clean median -> runtime inspector (trace_info.pb) ->
+#    per-NEFF capture/summary/ranking -> NEFF+NTFF pairs -> parquet op naming.
+#    Results: one tar per run under $ARCHIVE_DIR on the PVC (+ upload bundle).
+#
+# Launch:
+#   kubectl delete job muse-glimmer-30b-video --ignore-not-found
+#   kubectl apply -f muse-glimmer-30b-video-job.yaml
+#   kubectl logs job/muse-glimmer-30b-video > /tmp/muse-glimmer-30b-video
+# Full ladder instead of V5 only:
+#   kubectl set env --local -f muse-glimmer-30b-video-job.yaml RUNGS="V3 V4 V5" -o yaml | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: muse-glimmer-30b-video
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-video
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-type: trn3-dev1
+      resourceClaims:
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
+      containers:
+        - name: inference
+          image: public.ecr.aws/neuron/torch-neuronx:2.14.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-ec"
+            - |
+              set -euo pipefail
+              cd /tmp
+              git clone -b "$BRANCH" "$REPO_URL" repo
+              cd repo
+
+              # ── PROVENANCE part 1: which code ──
+              GIT_SHA=$(git rev-parse HEAD); GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+              echo "┌── PROVENANCE ──"
+              echo "│ repo   : $REPO_URL"
+              echo "│ branch : $GIT_BRANCH (requested: $BRANCH)"
+              echo "│ commit : $GIT_SHA"
+              echo "│ subject: $(git log -1 --pretty=%s)"
+              echo "└────────────────"
+
+              python3 -m pip install -q -U "transformers>=5.20" accelerate pillow imageio-ffmpeg duckdb
+              # image processor needs torchvision; pin to the image's torch 2.14.0 and
+              # --no-deps so pip can't swap torch (breaks the torch_neuronx ABI).
+              python3 -m pip install -q --no-deps torchvision==0.29.0
+              # ── PROVENANCE part 2: stack + the vision-path patch this repo applies ──
+              python3 -c 'import torch, torchvision, torch_neuronx, transformers, muse_compile as mc; print("PROVENANCE FEATURE: torch", torch.__version__, "torch_neuronx", torch_neuronx.__version__, "transformers", transformers.__version__, "vision_attention_patch", mc._vision_attention_forward.__name__)'
+              sha256sum "$VIDEO" | sed 's/^/PROVENANCE VIDEO: /'
+
+              # /var/mdl (PVC) has no rename/lock support -> HF hub cache breaks there.
+              # Keep caches on local disk; download once before torchrun so ranks don't race.
+              export HF_HOME=/tmp/hf_cache
+              export NEURON_COMPILE_CACHE_URL=/tmp/neuron-compile-cache
+              mkdir -p "$HF_HOME" "$NEURON_COMPILE_CACHE_URL"
+              python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))'
+
+              mkdir -p /tmp/results
+              for RUNG in $RUNGS; do
+                case "$RUNG" in
+                  V3) FLAGS="" ;;
+                  V4) FLAGS="--compile --vision eager" ;;
+                  V5) FLAGS="--compile --vision compile" ;;
+                  *) echo "unknown rung $RUNG"; exit 1 ;;
+                esac
+                echo "████ RUNG $RUNG  flags: $FLAGS ████"
+                torchrun --nproc_per_node="$TP_DEGREE" --master_port=29500 \
+                  run_muse_glimmer.py --tp $FLAGS --video "$VIDEO" --video-frames "$VIDEO_FRAMES" \
+                  --max-new-tokens "$MAX_NEW_TOKENS" 2>&1 | tee "/tmp/results/rung_$RUNG.txt" \
+                  || echo "████ RUNG $RUNG FAILED ████"
+                echo "████ RUNG $RUNG DONE ████"
+              done
+              grep -H "^DETERMINISM\|^VISION CHECK\|tok/s)$" /tmp/results/rung_V*.txt 2>/dev/null || true
+              echo "╔══ VALIDATE the descriptions above before trusting any profile numbers ($GIT_BRANCH @ ${GIT_SHA:0:12}) ══╗"
+
+              if [ "$PROFILE_VISION" = "1" ]; then
+                RUN_TAG="vision_profile_${GIT_SHA:0:12}_$(date +%Y%m%d_%H%M%S)"
+                RUN_TAG="$RUN_TAG" RESULTS=/tmp/results/vision_profile ARCHIVE_DIR="$ARCHIVE_DIR" \
+                  bash scripts/neuron/profile_vision_job.sh || echo "VISION PROFILE FAILED"
+                echo "kubectl cp default/$HOSTNAME:/tmp/${RUN_TAG}.tar.gz ./${RUN_TAG}.tar.gz"
+                echo "kubectl cp default/$HOSTNAME:/tmp/${RUN_TAG}_upload_bundle.tar.gz ./${RUN_TAG}_upload_bundle.tar.gz"
+              fi
+              echo "════════ RUN DONE ════════"
+              echo "holding ${HOLD_SECONDS}s for kubectl cp (set HOLD_SECONDS=0 to release the chips at once)"
+              sleep "$HOLD_SECONDS"
+          resources:
+            claims:
+              - name: m-lnc2
+            requests:
+              cpu: 22
+              memory: 220Gi
+              ephemeral-storage: 120Gi
+            limits:
+              cpu: 44
+              memory: 400Gi
+              ephemeral-storage: 200Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            - name: 621547421844-ap-southeast-4-pvc
+              mountPath: /var/mdl
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: NEURON_RT_LOG_LEVEL
+              value: "ERROR"
+            - name: NEURON_CC_LOG_LEVEL
+              value: "ERROR"
+            - name: TORCH_NEURONX_LOG_LEVEL
+              value: "ERROR"
+            - name: NEURON_CC_FLAGS
+              value: "--model-type=transformer"
+            - name: REPO_URL
+              value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
+            - name: BRANCH
+              value: "main"
+            - name: TP_DEGREE
+              value: "2"
+            # space-separated subset of: V3 V4 V5 (empty = profile only)
+            - name: RUNGS
+              value: "V5"
+            - name: VIDEO
+              value: "media/cat_sunglasses.mp4"
+            - name: VIDEO_FRAMES
+              value: "8"
+            - name: MAX_NEW_TOKENS
+              value: "256"
+            - name: PROFILE_VISION
+              value: "1"
+            - name: ITERS
+              value: "10"
+            - name: MAX_PAIRS
+              value: "3"
+            - name: ARCHIVE_DIR
+              value: "/var/mdl/muse_glimmer/runs"
+            - name: HOLD_SECONDS
+              value: "1800"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
+        - name: 621547421844-ap-southeast-4-pvc
+          persistentVolumeClaim:
+            claimName: 621547421844-ap-southeast-4-pvc
