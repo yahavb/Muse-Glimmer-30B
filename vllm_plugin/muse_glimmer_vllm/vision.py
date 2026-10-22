@@ -84,6 +84,10 @@ class MuseGlimmerVisionEncoder(nn.Module):
         super().__init__()
         vcfg = hf_config.vision_config
         vcfg._attn_implementation = "sdpa"
+        # The bring-up (transformers 5.20.2) loaded the vision RoPE as {"rope_type": "axial",
+        # "rope_theta": 10000}. The vLLM image's loader (transformers 5.17.0 / vLLM) keeps the
+        # checkpoint's "default", which MuseGlimmerVisionRotaryEmbedding rejects. Same theta.
+        vcfg.rope_parameters = {**dict(vcfg.rope_parameters or {}), "rope_type": "axial"}
         self.tower = mg.MuseGlimmerVisionModel(vcfg)
         self.adapter = mg.MuseGlimmerVisionAdapter(hf_config)
         self.projection = nn.Linear(hf_config.projector_hidden_size, hf_config.text_config.hidden_size, bias=False)
