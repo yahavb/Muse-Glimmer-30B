@@ -11,8 +11,10 @@ Same code that compiled and ran on trn3 with fullgraph=True in the bare bring-up
 The only addition: the output is written into vLLM's on-device encoder cache at
 `write_block_ids` (the runner's contract), instead of being returned.
 
-Fixed size, as validated: every image is resized to IMAGE_SIZE x IMAGE_SIZE ->
-grid [1, 32, 32] -> 1024 patches -> 256 embeddings = one encoder-cache block.
+Fixed sizes, as validated (one compiled vision graph each):
+  image: IMAGE_SIZE x IMAGE_SIZE -> grid [1, 32, 32] -> 1024 patches -> 256 embeddings
+  video: VIDEO_FRAMES frames at VIDEO_W x VIDEO_H -> grid [4, 20, 26] -> 2080 patches -> 520
+The graph is picked by patch count; embeddings fill the item's cache blocks in order.
 """
 
 import torch
@@ -29,6 +31,10 @@ from transformers.vision_utils import (
 
 IMAGE_SIZE = 448
 IMAGE_GRID = (1, IMAGE_SIZE // 14, IMAGE_SIZE // 14)  # (T, H, W) in patches
+VIDEO_FRAMES, VIDEO_W, VIDEO_H = 8, 480, 368  # the validated clip (V3-V5)
+VIDEO_GRID = (4, 20, 26)  # transformers processor grid for 8 frames at 480x368
+GRIDS = {IMAGE_GRID[0] * IMAGE_GRID[1] * IMAGE_GRID[2]: IMAGE_GRID,
+         VIDEO_GRID[0] * VIDEO_GRID[1] * VIDEO_GRID[2]: VIDEO_GRID}  # patches -> grid
 META_KEYS = ("cu_seqlens", "window_index", "cu_window_seqlens", "position_ids",
              "interp_indices", "interp_weights", "pixel_shuffle_index")
 
@@ -99,12 +105,14 @@ class MuseGlimmerVisionEncoder(nn.Module):
         meta = dict(cu_seqlens=cu_seqlens, window_index=window_index, cu_window_seqlens=cu_window_seqlens,
                     position_ids=position_ids, interp_indices=interp_indices, interp_weights=interp_weights,
                     pixel_shuffle_index=pixel_shuffle_index)
-        grid = torch.tensor([IMAGE_GRID], device=pixel_values.device)
+        grid = torch.tensor([GRIDS[pixel_values.shape[0]]], device=pixel_values.device)  # static per graph
         feats = self.tower(pixel_values=pixel_values, grid_thw=grid, **meta).last_hidden_state
-        emb = self.perception_emb_norm(self.projection(self.adapter(feats)))  # [256, hidden]
-        # one image = one cache block; write_block_ids[0] is its block (rest are scratch pad)
+        emb = self.perception_emb_norm(self.projection(self.adapter(feats)))  # [n, hidden]
+        # embeddings fill the item's blocks in order (dense: full blocks, then the remainder);
+        # trailing write_block_ids are the scratch pad
         n, d = emb.shape
         block = encoder_cache_buffer.shape[1]
-        rows = write_block_ids[0] * block + torch.arange(n, device=emb.device)
+        t = torch.arange(n, device=emb.device)
+        rows = write_block_ids[t // block] * block + t % block
         encoder_cache_buffer.view(-1, d).index_copy_(0, rows, emb.to(encoder_cache_buffer.dtype))
         return encoder_cache_buffer

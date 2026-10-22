@@ -21,7 +21,7 @@ from .processing import (
 @MULTIMODAL_REGISTRY.register_processor(
     MuseGlimmerNeuronProcessor, info=MuseGlimmerNeuronProcessingInfo, dummy_inputs=MuseGlimmerNeuronDummyInputs)
 class MuseGlimmerForConditionalGeneration(nn.Module):
-    """Factory: validates config, returns the implementation (text + images).
+    """Factory: validates config, returns the implementation (text, images, video).
 
     vLLM inspects the registered class when it builds ModelConfig (in the API process,
     before any Neuron worker exists). Its VllmModelForTextGeneration protocol (vLLM 0.29
@@ -49,7 +49,9 @@ class MuseGlimmerForConditionalGeneration(nn.Module):
     def get_placeholder_str(cls, modality: str, i: int) -> str | None:
         if modality.startswith("image"):
             return "<|patch|>"  # the chat template's image part; the processor expands it
-        raise ValueError(f"Muse-Glimmer on vLLM Neuron: modality {modality!r} is not enabled")
+        if modality.startswith("video"):
+            return "<|video|>"
+        raise ValueError(f"Muse-Glimmer on vLLM Neuron: modality {modality!r} is not supported")
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self._model.model.embed_tokens(input_ids)

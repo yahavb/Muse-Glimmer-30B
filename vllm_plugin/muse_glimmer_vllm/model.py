@@ -357,14 +357,16 @@ class MuseGlimmerForCausalLM(nn.Module):
         self.encoder_neuron_config = encoder_neuron_config
         self.visual = None
         if hf_config is not None and getattr(hf_config, "vision_config", None) is not None:
-            from .vision import IMAGE_GRID, MuseGlimmerVisionEncoder, precompute_vision_kwargs
+            from .vision import GRIDS, MuseGlimmerVisionEncoder, precompute_vision_kwargs
 
             # Built on CPU (the runner builds the model under the meta device): its
             # non-persistent buffers (vision RoPE inv_freq) must hold real values.
             # Replicated on every rank, like the validated one-core vision run.
             with torch.device("cpu"):
                 self.visual = MuseGlimmerVisionEncoder(hf_config).to(config.torch_dtype)
-                self._vision_meta = precompute_vision_kwargs(self.visual.tower, torch.tensor([IMAGE_GRID]))
+                # host-side grid metadata per fixed shape (patch count -> metadata)
+                self._vision_meta = {n: precompute_vision_kwargs(self.visual.tower, torch.tensor([g]))
+                                     for n, g in GRIDS.items()}
         self.tp_group = get_tp_group()
         self.world_size = self.tp_group.world_size
         self.rank = self.tp_group.rank_in_group
@@ -426,38 +428,38 @@ class MuseGlimmerForCausalLM(nn.Module):
         return math.ceil(math.ceil(bucket / enc.encoder_attention_block_size) / enc.dp_size) * enc.dp_size
 
     def build_encoder_synthetic_inputs(self, bucket, encoder_neuron_config, device):
-        """Warmup inputs for the vision graph: the fixed grid's real metadata + zero pixels."""
-        from .vision import IMAGE_GRID
-
-        n_patches = IMAGE_GRID[0] * IMAGE_GRID[1] * IMAGE_GRID[2]
+        """Warmup inputs for one vision graph: bucket = patch count of a fixed shape
+        (1024 image, 2080 video); that grid's real metadata + zero pixels."""
+        if bucket not in self._vision_meta:
+            raise ValueError(f"encoder bucket {bucket} is not a fixed vision shape {sorted(self._vision_meta)}")
         patch_dim = self.visual.tower.patch_embedder.patch_embedding.in_features
-        kw = {k: v.to(device) for k, v in self._vision_meta.items()}
-        kw["pixel_values"] = torch.zeros(n_patches, patch_dim, dtype=torch.float32, device=device)
+        kw = {k: v.to(device) for k, v in self._vision_meta[bucket].items()}
+        kw["pixel_values"] = torch.zeros(bucket, patch_dim, dtype=torch.float32, device=device)
         return kw
 
     def embed_multimodal(self, encoder_cache=None, mm_hashes=None, image_pixel_values=None,
-                         image_feature_sizes=None, video_pixel_values=None, **kwargs):
-        """Encode images into the on-device encoder cache, one image per vision-graph call."""
-        if video_pixel_values is not None:
-            raise NotImplementedError("Muse-Glimmer video on vLLM Neuron is not enabled yet")
-        if image_pixel_values is None:
-            raise ValueError("embed_multimodal: no image_pixel_values")
-        from .vision import IMAGE_GRID
-
-        items = list(image_pixel_values) if not isinstance(image_pixel_values, torch.Tensor) or \
-            image_pixel_values.dim() == 3 else [image_pixel_values]
-        assert len(items) == len(mm_hashes), f"{len(items)} images vs {len(mm_hashes)} hashes"
-        n_patches = IMAGE_GRID[0] * IMAGE_GRID[1] * IMAGE_GRID[2]
-        n_embed = n_patches // self.visual.merge_factor
+                         image_feature_sizes=None, video_pixel_values=None, video_feature_sizes=None,
+                         video_timestamps=None, **kwargs):
+        """Encode images or videos into the on-device encoder cache, one item per vision-graph call.
+        The runner groups by modality, so one of image_/video_pixel_values is set per call."""
+        pix = image_pixel_values if image_pixel_values is not None else video_pixel_values
+        if pix is None:
+            raise ValueError("embed_multimodal: no image_pixel_values / video_pixel_values")
+        items = list(pix) if not isinstance(pix, torch.Tensor) or pix.dim() == 3 else [pix]
+        assert len(items) == len(mm_hashes), f"{len(items)} items vs {len(mm_hashes)} hashes"
         enc = self.encoder_neuron_config
-        num_blocks = self._vision_num_blocks(n_patches, enc)
         device = next(self.visual.parameters()).device
-        meta = {k: v.to(device) for k, v in self._vision_meta.items()}
         for mm_hash, pv in zip(mm_hashes, items):
-            assert tuple(pv.shape[-2:]) == (n_patches, pv.shape[-1]), f"image pixels {tuple(pv.shape)} != fixed grid"
+            pv = pv.reshape(-1, pv.shape[-1])
+            n_patches = pv.shape[0]
+            if n_patches not in self._vision_meta:
+                raise ValueError(f"{n_patches} patches is not a fixed vision shape {sorted(self._vision_meta)}")
+            n_embed = n_patches // self.visual.merge_factor
+            num_blocks = self._vision_num_blocks(n_patches, enc)
+            meta = {k: v.to(device) for k, v in self._vision_meta[n_patches].items()}
             blocks = encoder_cache.allocate(mm_hash, encoder_cache.dense_tokens_per_block(n_embed, encoder_cache.block_size))
             write = torch.tensor(blocks + [encoder_cache.scratch_block_id] * (num_blocks - len(blocks)), dtype=torch.int64)
-            self.visual(pixel_values=pv.reshape(n_patches, -1).to(device), **meta,
+            self.visual(pixel_values=pv.to(device), **meta,
                         encoder_cache_buffer=encoder_cache.buffer, write_block_ids=write.to(device))
 
     # ── KV cache ──
