@@ -118,6 +118,10 @@ spec:
             # the image may carry torch-neuronx too; vllm-neuron compiles via libtorch-neuronx-lite
             - name: TORCH_DEVICE_BACKEND_AUTOLOAD
               value: "0"
+            # native torch.compile path (vllm-neuron's default; explicit for provenance).
+            # See https://awsdocs-neuron.readthedocs-hosted.com/en/latest/inference-native-pytorch.html
+            - name: VLLM_NEURON_BACKEND
+              value: "neuron_native"
             - name: REPO_URL
               value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
             - name: BRANCH
