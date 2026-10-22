@@ -262,3 +262,21 @@ decode bucket (1).
 | Answer | correct | correct, same explanation (bits as switches, qubits as spinning coins, superposition, entanglement) |
 
 Decode is slower: each step reads the whole cached context through the block table in plain PyTorch.
+
+## vLLM serving, phase 2: images (2026-10-22)
+
+Job `muse-glimmer-30b-vllm-job.yaml` @ 3f1a32c (branch `exp/vllm-phase2`). Vision path = the
+validated fullgraph vision graph (R5 / vision profile), replicated on each core, writing into
+vLLM's encoder cache; pixels from the transformers processor at 448x448 (256 image tokens).
+
+| Request | Prompt tokens | TTFT | Decode | Result |
+|---|---|---|---|---|
+| text-1 | 34 | 0.340 s | 9.3 tok/s | correct (same as phase 1) |
+| bee.jpg | 289 | 0.783 s | 9.3 tok/s | correct (pink cosmos, bumblebee) |
+| count red circles | 299 | 0.430 s | 9.3 tok/s | PASS ("3") |
+| read word | 293 | 0.527 s | 9.3 tok/s | PASS ("TRAINIUM") |
+| square color | 299 | 0.526 s | 9.3 tok/s | PASS ("green") |
+| text-2 (after images) | 34 | 0.414 s | 9.3 tok/s | differs from text-1 at char 141 |
+
+text-2 hit vLLM's prefix cache (hit rate 0% -> 2.6% at that request), a path the bring-up never
+had; prefix caching is now off in the job.
