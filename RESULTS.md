@@ -15,7 +15,6 @@
 | **Timed generate** | **256 tokens in 77.9 s = 3.3 tok/s** |
 | Output | coherent, correct answer |
 
-Raw log: `logs/eager_tp2_m-lnc2_20261021.log`
 
 ## fullgraph=True readiness (CPU, tiny random-weight model, same model code)
 
@@ -58,7 +57,6 @@ Same setup as R1 (TP=2, `m-lnc2`, same image, prompt, greedy, 256 tokens). Text 
 
 No graph breaks, no op fallback errors, no OOM on device.
 
-Raw log: `logs/compile_fullgraph_tp2_m-lnc2_20261021.log`
 
 ## Image test method (R3-R5)
 
@@ -77,7 +75,6 @@ Job: `muse-glimmer-30b-vision-job.yaml`. Same TP=2, `m-lnc2`, greedy decoding.
 ## Image ladder, attempt 1 (2026-10-21) — R3/R4 failed, R5 passed
 
 Ran with the code version before the checks were added (no vision check, cases or token match).
-Raw log: `logs/vision_ladder_attempt1_20261021.log`
 
 | Rung | Result |
 |---|---|
@@ -97,7 +94,6 @@ the features to `generate` as `mm_encoder_outputs`. CPU check: tokens identical 
 
 ## Image ladder, attempt 2 (2026-10-21) — all rungs ran
 
-Raw log: `logs/vision_ladder_attempt2_20261021.log`. Main image bee.jpg
 (sha256 `8b21ba78…c99a6d`), 448x448, 289 prompt tokens (256 image), 256 new tokens, greedy, TP=2.
 
 | Rung | Text decoder | Vision tower | Warmup | TTFT (vision part) | Decode | End to end | Cases* |
@@ -122,7 +118,6 @@ right after the answer channel opened). Fixed for the next run: budget 256, answ
 
 ## Image ladder, attempt 3 (2026-10-22) — harness fix, all cases pass
 
-Raw log: `logs/vision_ladder_attempt3_20261022.log`. Same setup as attempt 2; case budget 256 tokens,
 answers cut at `<|eot|>`.
 
 | Rung | Text decoder | Vision tower | Warmup | TTFT (vision part) | Decode | End to end | Cases |
@@ -149,7 +144,6 @@ nondeterminism (e.g. TP all-reduce / accumulation order) from compile-to-compile
 
 ## Video ladder, attempt 1 (2026-10-22) — V3 passed, V4/V5 crashed in the harness
 
-Raw log: `logs/video_ladder_attempt1_20261022.log`. Video `tmpa4xpneaq.mp4` (sha256 `3e799f3e…ce12b02`),
 480x368, 21 frames @ 16 fps, 1.3 s. 8 frames sampled evenly [0,3,6,9,11,14,17,20] with real
 timestamps -> grid 4x20x26 -> 520 video tokens, 584-token prompt, greedy, 256 new tokens, TP=2.
 
@@ -166,7 +160,6 @@ timestamps -> grid 4x20x26 -> 520 video tokens, 584-token prompt, greedy, 256 ne
 
 ## Video ladder, attempt 2 (2026-10-22) — V4/V5 (V3 from attempt 1)
 
-Raw log: `logs/video_ladder_attempt2_20261022.log`. Same video and settings; `RUNGS="V4 V5"`.
 
 | Rung | Text decoder | Vision tower | Warmup | TTFT (vision part) | Decode | End to end |
 |---|---|---|---|---|---|---|

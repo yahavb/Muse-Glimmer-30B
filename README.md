@@ -7,7 +7,7 @@ the native PyTorch backend for Trainium, from the public
 [`neuron/torch-neuronx`](https://gallery.ecr.aws/neuron/torch-neuronx) image. Hugging Face
 `transformers` model code, BF16, tensor parallel TP=2, `torch.compile(fullgraph=True)`.
 
-Full numbers, methods and every failure along the way: [RESULTS.md](RESULTS.md). Raw logs: [logs/](logs/).
+Full numbers, methods and every failure along the way: [RESULTS.md](RESULTS.md).
 
 ## The ladder (BF16, TP=2, greedy, 256 new tokens)
 
