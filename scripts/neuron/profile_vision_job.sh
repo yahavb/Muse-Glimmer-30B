@@ -17,6 +17,7 @@
 #
 # Run from the repo root inside the job pod:  bash scripts/neuron/profile_vision_job.sh
 # Env: VIDEO VIDEO_FRAMES ITERS MAX_PAIRS INGEST_TIMEOUT RESULTS ARCHIVE_DIR RUN_TAG
+#      STEP_TIMES (file to append "<seconds>\t<step>" lines to; the job prints the table)
 #      INGEST_FLOOR_BYTES / INGEST_QUIET_S (parquet completion rule; lower only for dry runs)
 set -euo pipefail
 
@@ -33,6 +34,14 @@ RUN_TAG=${RUN_TAG:-vision_profile_$(date +%Y%m%d_%H%M%S)}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 rm -rf "$RESULTS"; mkdir -p "$RESULTS"
+STEP_TIMES=${STEP_TIMES:-$RESULTS/step_times.tsv}
+# t_mark <name>: close the running step (append its wall seconds), open <name> ("" = none)
+t_mark() {
+  local now; now=$(date +%s)
+  [ -n "${T_NAME:-}" ] && printf '%s\t%s\n' "$((now - T_START))" "profile ${T_NAME}" >> "$STEP_TIMES"
+  T_NAME="$1"; T_START=$now
+}
+t_mark "setup"
 PROF=neuron-explorer
 command -v "$PROF" >/dev/null || PROF=/opt/aws/neuron/bin/neuron-explorer
 [ -x "$PROF" ] || command -v "$PROF" >/dev/null || PROF=neuron-profile
@@ -43,7 +52,8 @@ python3 -c "import duckdb" 2>/dev/null || python3 -m pip install -q duckdb
 archive() {
   local rc=$?
   set +e
-  local tgz="/tmp/${RUN_TAG}.tar.gz"
+  local tgz="/tmp/${RUN_TAG}.tar.gz" a0; a0=$(date +%s)
+  cp "$STEP_TIMES" "$RESULTS/" 2>/dev/null
   tar -czf "$tgz" -C "$(dirname "$RESULTS")" "$(basename "$RESULTS")" 2>/dev/null
   echo "ARCHIVE: $tgz $(wc -c < "$tgz") bytes (exit code $rc)"
   if [ -n "$ARCHIVE_DIR" ]; then
@@ -54,6 +64,7 @@ archive() {
         && echo "  saved $ARCHIVE_DIR/$(basename "$f")" || echo "  COPY FAILED/short: $f"
     done
   fi
+  printf '%s\t%s\n' "$(( $(date +%s) - a0 ))" "profile archive" >> "$STEP_TIMES"
 }
 trap archive EXIT
 
@@ -69,6 +80,7 @@ median_of() { grep -oE "median=[0-9.]+ms" "$1" | tail -1 || true; }
 
 echo "════════ VISION PROFILE (TP=1, ${VIDEO}, ${VIDEO_FRAMES} frames) ════════"
 
+t_mark "[1/3] warmup compile + check"
 echo "=== [1/3] WARMUP: compile into empty stage cache (not timed) + VISION CHECK vs CPU ==="
 "${BENCH[@]}" --warmup 1 --iters 0 --check 2>&1 | tee "$RESULTS/warmup.txt" \
   | grep -E "VIDEO|VISION|built=|reference|Error|Traceback" || echo "WARMUP FAILED"
@@ -87,11 +99,13 @@ N_NEFF=$(ls "$NEFFS"/*.neff 2>/dev/null | wc -l || true)
 echo "vision-stage NEFFs: $N_NEFF unique (from $(wc -l < "$RESULTS/stage_neff_paths.txt") files)"
 sort -k2 -n -r "$RESULTS/neff_index.txt" 2>/dev/null | head -10 | sed 's/^/  /' || true
 
+t_mark "[2/3] clean run"
 echo "=== [2/3] CLEAN RUN (NO profiler): median of $ITERS = REAL vision latency ==="
 "${BENCH[@]}" --warmup 1 --iters "$ITERS" 2>&1 | tee "$RESULTS/clean.txt" \
   | grep -E "built=|median=|Error|Traceback" || echo "CLEAN RUN FAILED"
 T_CLEAN=$(median_of "$RESULTS/clean.txt")
 
+t_mark "[3a] runtime inspector"
 echo "=== [3a] RUNTIME INSPECTOR (system + device profile) -> trace_info.pb ==="
 SYSTRACE=/tmp/vision_systrace; rm -rf "$SYSTRACE"; mkdir -p "$SYSTRACE"
 NEURON_RT_INSPECT_ENABLE=1 NEURON_RT_INSPECT_SYSTEM_PROFILE=1 NEURON_RT_INSPECT_DEVICE_PROFILE=session \
@@ -128,6 +142,7 @@ else
   echo "  no session .ntff written"
 fi
 
+t_mark "[3b] system perfetto"
 echo "=== [3b] system timeline -> perfetto (WHEN graphs ran) ==="
 if [ -n "$RANKDIR" ]; then
   mkdir -p "$RESULTS/perfetto"
@@ -136,6 +151,7 @@ if [ -n "$RANKDIR" ]; then
   ls -la "$RESULTS/perfetto" 2>/dev/null | sed 's/^/  /' || true
 fi
 
+t_mark "[4] per-NEFF capture"
 echo "=== [4] per-NEFF capture --single-io + summary-json ($N_NEFF NEFFs) ==="
 POUT="$RESULTS/perneff"; mkdir -p "$POUT"
 OK=0
@@ -177,6 +193,7 @@ if [ -n "$TOP" ]; then
     | sed 's/^/  [rank01] /' || echo "  summary-text failed"
 fi
 
+t_mark "upload bundle"
 echo "=== upload bundle (Directory Upload for System Profile): rank dir + preserved pairs ==="
 if [ -n "$RANKDIR" ]; then
   UB=/tmp/${RUN_TAG}_upload_bundle; rm -rf "$UB"; mkdir -p "$UB"
@@ -187,6 +204,7 @@ if [ -n "$RANKDIR" ]; then
     echo "  /tmp/${RUN_TAG}_upload_bundle.tar.gz $(wc -c < "/tmp/${RUN_TAG}_upload_bundle.tar.gz") bytes"
 fi
 
+t_mark "[5] parquet op naming"
 echo "=== [5] instruction level: parquet per pair -> name the op (max $MAX_PAIRS pairs) ==="
 # Completion rule: the converter writes ~20KB of table headers at once, then parses for
 # minutes, then idles on a server forever. So: wait for > 2MB AND 3 min with no growth,
@@ -221,6 +239,7 @@ for d in "$PAIRS"/rank*; do
   fi
 done
 
+t_mark ""
 echo "════════ VISION PROFILE SUMMARY ════════"
 echo "  clean    (no profiler, REAL latency) : ${T_CLEAN:-N/A}"
 echo "  profiled (runtime inspector on)      : ${T_PROF:-N/A}"

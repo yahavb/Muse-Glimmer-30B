@@ -44,6 +44,14 @@ spec:
             - "-ec"
             - |
               set -euo pipefail
+              # ── timing: every step appends "<seconds>\t<name>"; table printed at the end ──
+              JOB_T0=$(date +%s); export STEP_TIMES=/tmp/step_times.tsv; : > "$STEP_TIMES"
+              t_mark() {
+                local now; now=$(date +%s)
+                [ -n "${T_NAME:-}" ] && printf '%s\t%s\n' "$((now - T_START))" "$T_NAME" >> "$STEP_TIMES"
+                T_NAME="$1"; T_START=$now
+              }
+              t_mark "git clone"
               cd /tmp
               git clone -b "$BRANCH" "$REPO_URL" repo
               cd repo
@@ -57,6 +65,7 @@ spec:
               echo "│ subject: $(git log -1 --pretty=%s)"
               echo "└────────────────"
 
+              t_mark "pip install"
               python3 -m pip install -q -U "transformers>=5.20" accelerate pillow imageio-ffmpeg duckdb
               # image processor needs torchvision; pin to the image's torch 2.14.0 and
               # --no-deps so pip can't swap torch (breaks the torch_neuronx ABI).
@@ -67,6 +76,7 @@ spec:
 
               # /var/mdl (PVC) has no rename/lock support -> HF hub cache breaks there.
               # Keep caches on local disk; download once before torchrun so ranks don't race.
+              t_mark "model download"
               export HF_HOME=/tmp/hf_cache
               export NEURON_COMPILE_CACHE_URL=/tmp/neuron-compile-cache
               mkdir -p "$HF_HOME" "$NEURON_COMPILE_CACHE_URL"
@@ -80,6 +90,7 @@ spec:
                   V5) FLAGS="--compile --vision compile" ;;
                   *) echo "unknown rung $RUNG"; exit 1 ;;
                 esac
+                t_mark "rung $RUNG (load + compile + warmup + timed)"
                 echo "████ RUNG $RUNG  flags: $FLAGS ████"
                 torchrun --nproc_per_node="$TP_DEGREE" --master_port=29500 \
                   run_muse_glimmer.py --tp $FLAGS --video "$VIDEO" --video-frames "$VIDEO_FRAMES" \
@@ -87,6 +98,7 @@ spec:
                   || echo "████ RUNG $RUNG FAILED ████"
                 echo "████ RUNG $RUNG DONE ████"
               done
+              t_mark ""
               grep -H "^DETERMINISM\|^VISION CHECK\|tok/s)$" /tmp/results/rung_V*.txt 2>/dev/null || true
               echo "╔══ VALIDATE the descriptions above before trusting any profile numbers ($GIT_BRANCH @ ${GIT_SHA:0:12}) ══╗"
 
@@ -97,6 +109,8 @@ spec:
                 echo "kubectl cp default/$HOSTNAME:/tmp/${RUN_TAG}.tar.gz ./${RUN_TAG}.tar.gz"
                 echo "kubectl cp default/$HOSTNAME:/tmp/${RUN_TAG}_upload_bundle.tar.gz ./${RUN_TAG}_upload_bundle.tar.gz"
               fi
+              echo "════════ E2E TIMING (wall clock; hold time excluded) ════════"
+              python3 scripts/print_step_times.py "$STEP_TIMES" "$(( $(date +%s) - JOB_T0 ))"
               echo "════════ RUN DONE ════════"
               echo "holding ${HOLD_SECONDS}s for kubectl cp (set HOLD_SECONDS=0 to release the chips at once)"
               sleep "$HOLD_SECONDS"
