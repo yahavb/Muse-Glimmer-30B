@@ -28,8 +28,6 @@ from vllm.distributed.parallel_state import get_tp_group
 
 import vllm_neuron.functional as NF
 import vllm_neuron.nn as neuron_nn
-from vllm_neuron.functional.attention.attention_decode import _torch_attention_decode_impl
-from vllm_neuron.functional.attention.attention_decode_mask import _torch_gen_attention_decode_mask_impl
 from vllm_neuron.model.kv_cache import KVSpec, LayerSpec, paged_slot_indices
 from vllm_neuron.model.neuron_config import NeuronConfig
 from vllm_neuron.nn.embedding import VocabDimShardedEmbedding
@@ -225,73 +223,75 @@ class MuseGlimmerAttention(nn.Module):
     # ── decode ──
 
     def forward_decode(self, hidden_states, positions, position_embeddings, attn_metadata):
+        """Decode attention in plain PyTorch over the paged KV cache.
+
+        Not the fused NKI megakernel: every model that uses it fuses o_proj inside, and the
+        Muse-Glimmer gate sits between attention and o_proj. Not the plugin's mask helpers
+        either: they emit the kernel's block-shuffled layout, which breaks for this geometry
+        (index 4035 out of 2176 for a 17-block SWA table). Here every step is explicit:
+          new-token QKV -> Q/K norm -> RoPE -> gather cached K/V by block table ->
+          mask by absolute position (causal; + window on local layers) -> attention over
+          [cached ; new] -> gate -> o_proj -> all-reduce -> write the new K/V.
+        """
         md = attn_metadata[self.layer_name]
         slot_mapping = md["slot_mapping"]
-        block_table = md["block_table_tensor"]
-        B = block_table.shape[0]
-        tokens, hidden = hidden_states.shape
+        block_table = md["block_table_tensor"]  # [B, nblk], -1 = unused
+        bs = md["block_size"]
+        B, nblk = block_table.shape
+        tokens = hidden_states.shape[0]
         S = tokens // B
         assert tokens == B * S, f"decode tokens {tokens} not a multiple of batch {B}"
         hidden_states = hidden_states.to(self.dtype)
-        X = hidden_states.view(B, S, hidden)
+        nq, nkh, D = self.num_attention_heads_per_rank, self.num_key_value_heads_per_rank, self.head_dim
         q_gamma, k_gamma = self._qk_gammas(hidden_states.device)
 
-        cos_k = sin_k = None
+        # new tokens: [T, N, D]
+        qkv = hidden_states @ self.qkv_proj_weight
+        q, k, v = torch.tensor_split(qkv, self.qkv_split_indices, dim=-1)
+        q = (_rms(q.view(tokens, nq, D), self.eps) * q_gamma.float().view(1, 1, -1)).to(self.dtype)
+        k = (_rms(k.view(tokens, nkh, D), self.eps) * k_gamma.float().view(1, 1, -1)).to(self.dtype)
+        v = v.view(tokens, nkh, D)
         if self.use_rope:
             cos, sin = position_embeddings
-            half = self.head_dim // 2
-            cos_k = cos[:, :half].view(B, S, half).permute(2, 0, 1).contiguous().to(self.dtype)
-            sin_k = sin[:, :half].view(B, S, half).permute(2, 0, 1).contiguous().to(self.dtype)
+            q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
 
-        # Decode runs the plugin's PyTorch attention block (compiled into the NEFF), not the
-        # fused NKI megakernel: every model that uses the megakernel fuses o_proj into it, and
-        # Muse-Glimmer's gate must sit between attention and o_proj (W_out=None failed to
-        # trace in the kernel). Mask: causal over this layer's blocks; local layers add the
-        # sliding-window start. The runner trims SWA block tables and passes
-        # swa_kv_pos_offset (GPT-OSS pattern).
-        S_ctx = md["max_blocks_per_seq"] * md["block_size"]
-        pos_ids = positions.view(1, B * S)
-        start = None
+        # cached K/V for each sequence: [B, nkh, nblk*bs, D]
+        safe_table = torch.clamp(block_table, min=0).to(torch.long)
+        kc = self.k_cache[safe_table]  # [B, nblk, nkh, bs, D]
+        vc = self.v_cache[safe_table]
+        kc = kc.permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
+        vc = vc.permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
+
+        # absolute position of every cached slot; SWA tables are trimmed to the window and
+        # start at swa_kv_pos_offset (= first kept block * block_size)
+        slot_pos = torch.arange(nblk * bs, device=hidden_states.device).view(1, 1, -1)  # [1, 1, C]
+        if self.sliding_window is not None and md.get("swa_kv_pos_offset") is not None:
+            slot_pos = slot_pos + md["swa_kv_pos_offset"].view(B, 1, 1).to(slot_pos.dtype)
+        pos = positions.view(B, S, 1).to(slot_pos.dtype)  # [B, S, 1]
+        valid = (block_table >= 0).repeat_interleave(bs, dim=1).view(B, 1, -1)  # [B, 1, C]
+        prior_ok = valid & (slot_pos < pos)  # cached tokens strictly before each query
         if self.sliding_window is not None:
-            off = md.get("swa_kv_pos_offset")
-            if off is not None:
-                pos_ids = torch.clamp(pos_ids - off.view(B, 1).expand(B, S).reshape(1, B * S), min=0)
-            start = torch.clamp(pos_ids - self.sliding_window + 1, min=0).to(torch.float32)
-        # PyTorch mask builder (the NKI gen_mask kernel failed to trace for these shapes);
-        # same semantics as NF.gen_attention_decode_mask: causal triu among active tokens.
-        nq = self.num_attention_heads_per_rank
-        active = torch.triu(torch.ones(S, S, dtype=torch.float32, device=hidden_states.device))
-        active = active[:, None, None, :].expand(S, B, nq, S).contiguous()
-        mask = _torch_gen_attention_decode_mask_impl(
-            pos_ids.to(torch.float32), bs=B, q_head=nq, s_active=S, s_prior=S_ctx,
-            start_pos=start, block_len=md["block_size"], active_mask=active)
+            prior_ok = prior_ok & (slot_pos > pos - self.sliding_window)
+        # among the new tokens: causal (and windowed; S is tiny, so always inside it)
+        act = torch.ones(S, S, dtype=torch.bool, device=hidden_states.device).tril().view(1, S, S).expand(B, S, S)
+        allowed = torch.cat([prior_ok, act], dim=-1)  # [B, S, C+S]
 
-        attn, K_new, V_new = _torch_attention_decode_impl(
-            X=X, X_hidden_dim_actual=self.hidden_size, rmsnorm_X_enabled=False,
-            W_qkv=self.qkv_proj_weight, bias_qkv=None,
-            rmsnorm_QK_pre_rope_enabled=True, rmsnorm_QK_pre_rope_eps=self.eps,
-            rmsnorm_QK_pre_rope_W_Q=q_gamma, rmsnorm_QK_pre_rope_W_K=k_gamma,
-            rmsnorm_QK_post_rope_enabled=False,
-            cos=cos_k, sin=sin_k, rope_contiguous_layout=True,
-            active_blocks_table=block_table, K_cache=self.k_cache, V_cache=self.v_cache,
-            attention_mask=mask, sink=None, softmax_scale=1.0,
-            update_cache=False, W_out=None, bias_out=None,  # <-- MUSE: gate before o_proj
-        )  # attn [B, Nh, Dh, S]; K_new [Dh, B*nkh, S]; V_new [B, nkh, S, Dh]
+        qb = q.view(B, S, nq, D).permute(0, 2, 1, 3)  # [B, nq, S, D]
+        kb = torch.cat([kc, k.view(B, S, nkh, D).permute(0, 2, 1, 3).to(kc.dtype)], dim=2)
+        vb = torch.cat([vc, v.view(B, S, nkh, D).permute(0, 2, 1, 3).to(vc.dtype)], dim=2)
+        kb = kb.repeat_interleave(nq // nkh, dim=1)
+        vb = vb.repeat_interleave(nq // nkh, dim=1)
+        scores = torch.matmul(qb.float(), kb.float().transpose(-1, -2))  # scale folded into Q gamma
+        scores = scores.masked_fill(~allowed.view(B, 1, S, -1), float("-inf"))
+        attn = torch.matmul(torch.softmax(scores, dim=-1), vb.float()).to(self.dtype)  # [B, nq, S, D]
 
-        # Write the new K/V with bounds-checked slots (padding slots are -1).
-        nkh = self.num_key_value_heads_per_rank
-        k_new = (K_new.permute(1, 2, 0).reshape(B, nkh, S, self.head_dim)
-                 .transpose(0, 1).reshape(nkh, B * S, self.head_dim))
-        v_new = V_new.transpose(0, 1).reshape(nkh, B * S, self.head_dim)
-        self._write_kv(k_new, v_new, slot_mapping, md["block_size"])
-
-        gate = torch.sigmoid(hidden_states @ self.gate_proj_weight)  # [B*S, Nh*Dh]
-        gate = gate.view(B, S, self.num_attention_heads_per_rank, self.head_dim).permute(0, 2, 3, 1)
-        attn = attn * gate.to(attn.dtype)
-        attn = attn.permute(0, 3, 1, 2).reshape(B * S, self.q_size)
-        out = attn @ self.o_proj_weight  # [B*S, H] partial over heads
+        gate = torch.sigmoid(hidden_states @ self.gate_proj_weight).view(B, S, nq, D).permute(0, 2, 1, 3)
+        attn = (attn * gate.to(attn.dtype)).permute(0, 2, 1, 3).reshape(tokens, nq * D)
+        out = attn @ self.o_proj_weight  # [T, H] partial over heads
         if self.world_size > 1:
             self.tp_group.all_reduce(out)
+
+        self._write_kv(k.transpose(0, 1), v.transpose(0, 1), slot_mapping, bs)  # [nkh, T, D]
         return out
 
 
