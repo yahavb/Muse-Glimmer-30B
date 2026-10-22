@@ -40,7 +40,13 @@ class MuseGlimmerForConditionalGeneration(nn.Module):
         raise NotImplementedError("vllm-neuron runs the LM head inside forward()")
 
     @classmethod
-    def from_configs(cls, hf_config: PretrainedConfig, neuron_config: NeuronConfig | None = None) -> nn.Module:
+    def from_configs(cls, hf_config: PretrainedConfig, neuron_config: NeuronConfig | None = None, *,
+                     text_neuron_config: NeuronConfig | None = None, encoder_neuron_config=None) -> nn.Module:
+        # The runner calls (hf_config, neuron_config) for text models and
+        # (hf_config=, text_neuron_config=, encoder_neuron_config=) once an encoder config
+        # exists. Phase 1 is text only: the encoder config is accepted and not used.
+        if neuron_config is None:
+            neuron_config = text_neuron_config
         quantization = neuron_config.quantization if neuron_config else None
         if quantization not in (None, "bf16"):
             raise ValueError(f"quantization={quantization!r} is not supported; Muse-Glimmer runs BF16")
