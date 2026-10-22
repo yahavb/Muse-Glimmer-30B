@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """Muse-Glimmer-30B text decoder for vLLM Neuron (BF16, TP + SP).
 
-Ported from the plugin's Qwen3 template (vllm_neuron/model/qwen3/model.py), with the
-sliding-window decode handling of vllm_neuron/model/gpt_oss/model_bf16.py.
+Mimics the validated path (HF transformers MuseGlimmer under torch.compile fullgraph=True on
+trn3): every layer is the same plain-PyTorch math as HF — no NKI kernels in the model. The one
+thing vLLM forces to differ is the KV cache: a paged cache read through block tables and
+written through slot mappings, instead of HF's StaticCache.
 
-Differences from Qwen3 (each marked  # <-- MUSE):
-  - Gated attention: out = o_proj(attn * sigmoid(gate_proj(x))). The gate sits between
-    attention and o_proj, so neither the prefill o_proj nor the decode megakernel fuses
-    the output projection.
-  - Q/K RMSNorm has NO weight; Q is scaled by qk_scale_factor (3.87) after its norm.
-    The whole softmax scale (3.87 / sqrt(head_dim)) is folded into the Q-norm gamma, so
-    every kernel runs with scale 1.0 (flash_attention requires 1.0 with a sliding window).
-  - Layers [local x3, global] repeat: local = sliding window 2048 + RoPE (theta 500000),
-    global = full attention, NoPE (cos/sin None -> the kernels skip RoPE).
-  - Four norms per layer, "centered" (x * (1 + w)): input, post-attention, pre-FF, post-FF.
-    post_* norms use post_norm_eps (1e-8).
-  - Embedding output goes through a weight-less RMSNorm; final norm is a standard RMSNorm.
-  - Logits: softcap(logits * output_multiplier) with cap = final_logit_softcapping.
+Plugin structure (from vllm_neuron/model/qwen3/model.py) kept for the runner contract: config,
+factory, get_kv_spec / bind_kv_cache, load_weights, SP prefill (all-gather / reduce-scatter),
+vocab-sharded embedding and column-parallel LM head (plain PyTorch + collectives).
+
+Muse-Glimmer specifics (as in HF MuseGlimmerTextModel):
+  - gated attention: o_proj(attn * sigmoid(gate_proj(x)))
+  - weight-less Q/K RMSNorm; Q scaled by qk_scale_factor (3.87) — folded with 1/sqrt(Dh)
+  - [local x3, global] layers: local = sliding window 2048 + RoPE theta 500000, global = NoPE
+  - four centered norms per layer (x * (1 + w)); post-* norms use post_norm_eps
+  - weight-less norm after the embedding; standard final RMSNorm
+  - logits: cap * tanh(logits * output_multiplier / cap), cap = final_logit_softcapping
 """
 
 import logging
@@ -158,59 +158,83 @@ class MuseGlimmerAttention(nn.Module):
 
     def forward(self, hidden_states, positions, position_embeddings, attn_metadata):
         md = attn_metadata[self.layer_name]
-        if md["max_query_len"] <= md["decode_token_threshold"]:
-            return self.forward_decode(hidden_states, positions, position_embeddings, attn_metadata)
+        is_decode = md["max_query_len"] <= md["decode_token_threshold"]
+        if not is_decode and self.world_size > 1:
+            hidden_states = self.tp_group.all_gather(hidden_states, dim=0)  # SP shard -> full sequence
+        out = self._attention(hidden_states, positions, position_embeddings, md)  # [T, H], partial over heads
         if self.world_size > 1:
-            hidden_states = self.tp_group.all_gather(hidden_states, dim=0)  # SP -> full sequence
-        return self.forward_prefill(hidden_states, position_embeddings, attn_metadata)
+            if is_decode:
+                self.tp_group.all_reduce(out)
+            else:
+                out = self.tp_group.reduce_scatter(out, dim=0)  # back to SP layout
+        return out
 
-    # ── prefill ──
+    def _attention(self, hidden_states, positions, position_embeddings, md):
+        """Same math as the validated HF path (MuseGlimmerTextAttention, eager/SDPA), in plain
+        PyTorch, for prefill and decode alike. The only difference is where cached K/V live:
+        vLLM's paged cache, read through the block table, instead of HF's StaticCache.
 
-    def forward_prefill(self, hidden_states, position_embeddings, attn_metadata):
-        hidden_states = hidden_states.to(self.dtype)
+          QKV -> weight-less Q/K RMSNorm (Q gamma = 3.87/sqrt(Dh), the whole softmax scale)
+          -> RoPE (rotate_half; NoPE layers skip it) -> softmax(QK^T + mask) V over
+          [cached ; new] -> * sigmoid(gate_proj(x)) -> o_proj.  New K/V written last.
+        Mask: causal by absolute position; local layers keep the last `sliding_window`
+        positions (HF: p - window < j <= p).
+        """
+        slot_mapping = md["slot_mapping"]
+        block_table = md["block_table_tensor"]  # [B, nblk], -1 = unused
+        bs = md["block_size"]
+        B, nblk = block_table.shape
         tokens = hidden_states.shape[0]
+        S = tokens // B
+        assert tokens == B * S, f"{tokens} tokens do not split evenly over {B} sequences"
+        hidden_states = hidden_states.to(self.dtype)
+        nq, nkh, D = self.num_attention_heads_per_rank, self.num_key_value_heads_per_rank, self.head_dim
         q_gamma, k_gamma = self._qk_gammas(hidden_states.device)
-        # QKV + weight-less Q/K RMSNorm (Q gamma = softmax scale) + RoPE in plain PyTorch.
-        # The fused NF.qkv_proj is untested with cos=None (NoPE layers) + QK-norm.
+
         qkv = hidden_states @ self.qkv_proj_weight
         q, k, v = torch.tensor_split(qkv, self.qkv_split_indices, dim=-1)
-        q = q.view(tokens, self.num_attention_heads_per_rank, self.head_dim)
-        k = k.view(tokens, self.num_key_value_heads_per_rank, self.head_dim)
-        v = v.view(tokens, self.num_key_value_heads_per_rank, self.head_dim)
-        q = (_rms(q, self.eps) * q_gamma.float().view(1, 1, -1)).to(self.dtype)
-        k = (_rms(k, self.eps) * k_gamma.float().view(1, 1, -1)).to(self.dtype)
+        q = (_rms(q.view(tokens, nq, D), self.eps) * q_gamma.float().view(1, 1, -1)).to(self.dtype)
+        k = (_rms(k.view(tokens, nkh, D), self.eps) * k_gamma.float().view(1, 1, -1)).to(self.dtype)
+        v = v.view(tokens, nkh, D)
         if self.use_rope:
             cos, sin = position_embeddings  # [T, Dh]
-            q = _apply_rope(q, cos, sin)
-            k = _apply_rope(k, cos, sin)
-        q, k, v = q.transpose(0, 1), k.transpose(0, 1), v.transpose(0, 1)  # [N, T, Dh]
+            q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
 
-        md = attn_metadata[self.layer_name]
-        block_size = md["block_size"]
-        self._write_kv(k, v, md["slot_mapping"], block_size)
+        # cached K/V per sequence: [B, nkh, nblk*bs, D]
+        safe_table = torch.clamp(block_table, min=0).to(torch.long)
+        kc = self.k_cache[safe_table].permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
+        vc = self.v_cache[safe_table].permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
 
-        kv_segment_size = md.get("kv_segment_size")
-        if kv_segment_size:
-            attn_output = NF.segmented_attention(
-                q, k_cache=self.k_cache, v_cache=self.v_cache, block_tables=md["block_table_tensor"],
-                prior_tokens=md.get("cached_seq_len"), block_size=block_size,
-                kv_segment_size=kv_segment_size, scale=1.0, sliding_window=self.sliding_window,
-                tp_q=True, tp_out=True)  # [Nh, Dh, T]
-        else:
-            k = k.repeat_interleave(self.num_key_value_groups, dim=0)
-            v = v.repeat_interleave(self.num_key_value_groups, dim=0)
-            attn_output = NF.flash_attention(
-                q.transpose(1, 2), k.transpose(1, 2), v, scale=1.0,
-                sliding_window=self.sliding_window, tp_q=False, tp_out=True)  # [Nh, Dh, T]
+        # absolute position of each cached slot; SWA tables are trimmed to the window and
+        # start at swa_kv_pos_offset (= first kept block * block_size)
+        slot_pos = torch.arange(nblk * bs, device=hidden_states.device).view(1, 1, -1)  # [1, 1, C]
+        if self.sliding_window is not None and md.get("swa_kv_pos_offset") is not None:
+            slot_pos = slot_pos + md["swa_kv_pos_offset"].view(B, 1, 1).to(slot_pos.dtype)
+        pos = positions.view(B, S, 1).to(slot_pos.dtype)  # [B, S, 1]
+        valid = (block_table >= 0).repeat_interleave(bs, dim=1).view(B, 1, -1)
+        prior_ok = valid & (slot_pos < pos)  # cached tokens before each query
+        new_pos = positions.view(B, 1, S).to(slot_pos.dtype)  # positions of the new tokens
+        new_ok = new_pos <= pos  # causal among new tokens
+        if self.sliding_window is not None:
+            prior_ok = prior_ok & (slot_pos > pos - self.sliding_window)
+            new_ok = new_ok & (new_pos > pos - self.sliding_window)
+        allowed = torch.cat([prior_ok, new_ok], dim=-1)  # [B, S, C+S]
 
-        # <-- MUSE: gate before o_proj. gate [T, Nh*Dh] -> [Nh, Dh, T] to match attn_output
-        gate = torch.sigmoid(hidden_states @ self.gate_proj_weight)
-        gate = gate.view(tokens, self.num_attention_heads_per_rank, self.head_dim).permute(1, 2, 0)
-        attn_output = (attn_output * gate.to(attn_output.dtype)).unsqueeze(0)
-        out = NF.o_proj(attn_output, self.o_proj_weight, None).squeeze(0)  # [T, H]
-        if self.world_size > 1:
-            out = self.tp_group.reduce_scatter(out, dim=0)  # back to SP layout
-        return out.contiguous()
+        qb = q.view(B, S, nq, D).permute(0, 2, 1, 3)  # [B, nq, S, D]
+        kb = torch.cat([kc, k.view(B, S, nkh, D).permute(0, 2, 1, 3).to(kc.dtype)], dim=2)
+        vb = torch.cat([vc, v.view(B, S, nkh, D).permute(0, 2, 1, 3).to(vc.dtype)], dim=2)
+        kb = kb.repeat_interleave(nq // nkh, dim=1)  # HF repeat_kv
+        vb = vb.repeat_interleave(nq // nkh, dim=1)
+        scores = torch.matmul(qb.float(), kb.float().transpose(-1, -2))
+        scores = scores.masked_fill(~allowed.view(B, 1, S, -1), float("-inf"))
+        attn = torch.matmul(torch.softmax(scores, dim=-1), vb.float()).to(self.dtype)  # [B, nq, S, D]
+
+        gate = torch.sigmoid(hidden_states @ self.gate_proj_weight).view(B, S, nq, D).permute(0, 2, 1, 3)
+        attn = (attn * gate.to(attn.dtype)).permute(0, 2, 1, 3).reshape(tokens, nq * D)
+        out = attn @ self.o_proj_weight
+
+        self._write_kv(k.transpose(0, 1), v.transpose(0, 1), slot_mapping, bs)  # [nkh, T, D]
+        return out
 
     def _write_kv(self, k, v, slot_mapping, block_size):
         nkh = self.num_key_value_heads_per_rank
@@ -219,80 +243,6 @@ class MuseGlimmerAttention(nn.Module):
         index = (block_idx.repeat(nkh), heads, pos_idx.repeat(nkh))
         self.k_cache.index_put_(index, k.reshape(-1, self.head_dim).to(self.k_cache.dtype))
         self.v_cache.index_put_(index, v.reshape(-1, self.head_dim).to(self.v_cache.dtype))
-
-    # ── decode ──
-
-    def forward_decode(self, hidden_states, positions, position_embeddings, attn_metadata):
-        """Decode attention in plain PyTorch over the paged KV cache.
-
-        Not the fused NKI megakernel: every model that uses it fuses o_proj inside, and the
-        Muse-Glimmer gate sits between attention and o_proj. Not the plugin's mask helpers
-        either: they emit the kernel's block-shuffled layout, which breaks for this geometry
-        (index 4035 out of 2176 for a 17-block SWA table). Here every step is explicit:
-          new-token QKV -> Q/K norm -> RoPE -> gather cached K/V by block table ->
-          mask by absolute position (causal; + window on local layers) -> attention over
-          [cached ; new] -> gate -> o_proj -> all-reduce -> write the new K/V.
-        """
-        md = attn_metadata[self.layer_name]
-        slot_mapping = md["slot_mapping"]
-        block_table = md["block_table_tensor"]  # [B, nblk], -1 = unused
-        bs = md["block_size"]
-        B, nblk = block_table.shape
-        tokens = hidden_states.shape[0]
-        S = tokens // B
-        assert tokens == B * S, f"decode tokens {tokens} not a multiple of batch {B}"
-        hidden_states = hidden_states.to(self.dtype)
-        nq, nkh, D = self.num_attention_heads_per_rank, self.num_key_value_heads_per_rank, self.head_dim
-        q_gamma, k_gamma = self._qk_gammas(hidden_states.device)
-
-        # new tokens: [T, N, D]
-        qkv = hidden_states @ self.qkv_proj_weight
-        q, k, v = torch.tensor_split(qkv, self.qkv_split_indices, dim=-1)
-        q = (_rms(q.view(tokens, nq, D), self.eps) * q_gamma.float().view(1, 1, -1)).to(self.dtype)
-        k = (_rms(k.view(tokens, nkh, D), self.eps) * k_gamma.float().view(1, 1, -1)).to(self.dtype)
-        v = v.view(tokens, nkh, D)
-        if self.use_rope:
-            cos, sin = position_embeddings
-            q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
-
-        # cached K/V for each sequence: [B, nkh, nblk*bs, D]
-        safe_table = torch.clamp(block_table, min=0).to(torch.long)
-        kc = self.k_cache[safe_table]  # [B, nblk, nkh, bs, D]
-        vc = self.v_cache[safe_table]
-        kc = kc.permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
-        vc = vc.permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
-
-        # absolute position of every cached slot; SWA tables are trimmed to the window and
-        # start at swa_kv_pos_offset (= first kept block * block_size)
-        slot_pos = torch.arange(nblk * bs, device=hidden_states.device).view(1, 1, -1)  # [1, 1, C]
-        if self.sliding_window is not None and md.get("swa_kv_pos_offset") is not None:
-            slot_pos = slot_pos + md["swa_kv_pos_offset"].view(B, 1, 1).to(slot_pos.dtype)
-        pos = positions.view(B, S, 1).to(slot_pos.dtype)  # [B, S, 1]
-        valid = (block_table >= 0).repeat_interleave(bs, dim=1).view(B, 1, -1)  # [B, 1, C]
-        prior_ok = valid & (slot_pos < pos)  # cached tokens strictly before each query
-        if self.sliding_window is not None:
-            prior_ok = prior_ok & (slot_pos > pos - self.sliding_window)
-        # among the new tokens: causal (and windowed; S is tiny, so always inside it)
-        act = torch.ones(S, S, dtype=torch.bool, device=hidden_states.device).tril().view(1, S, S).expand(B, S, S)
-        allowed = torch.cat([prior_ok, act], dim=-1)  # [B, S, C+S]
-
-        qb = q.view(B, S, nq, D).permute(0, 2, 1, 3)  # [B, nq, S, D]
-        kb = torch.cat([kc, k.view(B, S, nkh, D).permute(0, 2, 1, 3).to(kc.dtype)], dim=2)
-        vb = torch.cat([vc, v.view(B, S, nkh, D).permute(0, 2, 1, 3).to(vc.dtype)], dim=2)
-        kb = kb.repeat_interleave(nq // nkh, dim=1)
-        vb = vb.repeat_interleave(nq // nkh, dim=1)
-        scores = torch.matmul(qb.float(), kb.float().transpose(-1, -2))  # scale folded into Q gamma
-        scores = scores.masked_fill(~allowed.view(B, 1, S, -1), float("-inf"))
-        attn = torch.matmul(torch.softmax(scores, dim=-1), vb.float()).to(self.dtype)  # [B, nq, S, D]
-
-        gate = torch.sigmoid(hidden_states @ self.gate_proj_weight).view(B, S, nq, D).permute(0, 2, 1, 3)
-        attn = (attn * gate.to(attn.dtype)).permute(0, 2, 1, 3).reshape(tokens, nq * D)
-        out = attn @ self.o_proj_weight  # [T, H] partial over heads
-        if self.world_size > 1:
-            self.tp_group.all_reduce(out)
-
-        self._write_kv(k.transpose(0, 1), v.transpose(0, 1), slot_mapping, bs)  # [nkh, T, D]
-        return out
 
 
 # ── MLP ──────────────────────────────────────────────────────────────────────
@@ -320,7 +270,8 @@ class MuseGlimmerMLP(nn.Module):
     def forward(self, x, is_prefill: bool):
         if is_prefill and self.world_size > 1:
             x = self.tp_group.all_gather(x, dim=0)
-        out = NF.mlp(x, self.gate_proj_weight, self.up_proj_weight, self.down_proj_weight)
+        # HF MuseGlimmerTextMLP: down(silu(gate(x)) * up(x))
+        out = (torch.nn.functional.silu(x @ self.gate_proj_weight) * (x @ self.up_proj_weight)) @ self.down_proj_weight
         if self.world_size > 1:
             if is_prefill:
                 out = self.tp_group.reduce_scatter(out, dim=0)
