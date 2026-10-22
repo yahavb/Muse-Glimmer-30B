@@ -9,7 +9,8 @@
 # 2. PROFILE_VISION=1: scripts/neuron/profile_vision_job.sh — vision tower alone on ONE core
 #    (TP=1, no collectives): warmup -> clean median -> runtime inspector (trace_info.pb) ->
 #    per-NEFF capture/summary/ranking -> NEFF+NTFF pairs -> parquet op naming.
-#    Results: one tar per run under $ARCHIVE_DIR on the PVC (+ upload bundle).
+#    Results: one tar per run under $ARCHIVE_DIR on the PVC (+ upload bundle). The PVC is
+#    S3-backed (ARCHIVE_S3 below), so fetch with the `aws s3 cp` lines the job prints.
 #
 # Launch:
 #   kubectl delete job muse-glimmer-30b-video --ignore-not-found
@@ -106,13 +107,13 @@ spec:
                 RUN_TAG="vision_profile_${GIT_SHA:0:12}_$(date +%Y%m%d_%H%M%S)"
                 RUN_TAG="$RUN_TAG" RESULTS=/tmp/results/vision_profile ARCHIVE_DIR="$ARCHIVE_DIR" \
                   bash scripts/neuron/profile_vision_job.sh || echo "VISION PROFILE FAILED"
-                echo "kubectl cp default/$HOSTNAME:/tmp/${RUN_TAG}.tar.gz ./${RUN_TAG}.tar.gz"
-                echo "kubectl cp default/$HOSTNAME:/tmp/${RUN_TAG}_upload_bundle.tar.gz ./${RUN_TAG}_upload_bundle.tar.gz"
+                echo "FETCH: aws s3 cp $ARCHIVE_S3/${RUN_TAG}.tar.gz ."
+                echo "FETCH: aws s3 cp $ARCHIVE_S3/${RUN_TAG}_upload_bundle.tar.gz ."
               fi
               echo "════════ E2E TIMING (wall clock; hold time excluded) ════════"
               python3 scripts/print_step_times.py "$STEP_TIMES" "$(( $(date +%s) - JOB_T0 ))"
               echo "════════ RUN DONE ════════"
-              echo "holding ${HOLD_SECONDS}s for kubectl cp (set HOLD_SECONDS=0 to release the chips at once)"
+              echo "holding ${HOLD_SECONDS}s (artifacts are on S3; >0 only to kubectl exec into the pod)"
               sleep "$HOLD_SECONDS"
           resources:
             claims:
@@ -164,8 +165,11 @@ spec:
               value: "3"
             - name: ARCHIVE_DIR
               value: "/var/mdl/muse_glimmer/runs"
+            # the same folder, addressed through the bucket behind the PVC
+            - name: ARCHIVE_S3
+              value: "s3://621547421844-ap-southeast-4/muse_glimmer/runs"
             - name: HOLD_SECONDS
-              value: "1800"
+              value: "0"
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
