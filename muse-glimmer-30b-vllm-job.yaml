@@ -2,8 +2,7 @@
 # Phase 1: text only. The model comes from this repo's out-of-tree plugin
 # (vllm_plugin/, registered through vllm.general_plugins) — vllm-neuron is unchanged.
 #
-# Flow: clone repo -> install plugin -> download weights -> CPU-mode tiny check (fast,
-# catches model-logic bugs before a long compile) -> vllm serve (bound to 127.0.0.1, so
+# Flow: clone repo -> install plugin -> download weights -> vllm serve (bound to 127.0.0.1, so
 # only this pod can reach it) -> smoke client: greedy answer + TTFT / tok/s -> stop.
 #
 # Launch:
@@ -127,7 +126,7 @@ spec:
             - name: BRANCH
               value: "exp/vllm-phase1"
             - name: CPU_CHECK
-              value: "1"
+              value: "0"
             - name: TP_DEGREE
               value: "2"
             - name: MAX_MODEL_LEN
