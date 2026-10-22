@@ -240,3 +240,25 @@ likely spill (the VIRTUAL traffic). Equal-size segments can run as a batched SDP
 **Run timing (83.4 min end to end):** V5 rung 14.2 min; profile warmup 1.5, clean 1.1,
 session device profile 7.6, system perfetto 15.1, per-NEFF capture 11.7, upload bundle 4.0,
 parquet 18.9, archive 8.4 (4.7 GB session trace).
+
+## vLLM serving, phase 1: text (2026-10-22)
+
+`vllm serve` on trn3 with vLLM Neuron (plugin 0.29.0.1.2.0, vLLM 0.29.0), this repo's out-of-tree
+model `vllm_plugin/` (registered via `vllm.general_plugins`). Job `muse-glimmer-30b-vllm-job.yaml`
+@ 73ef0cf. TP=2, `m-lnc2`, same node, CPU and memory limits as the bare bring-up.
+
+Model code: same plain-PyTorch math as the HF path validated above (no NKI kernels in the model);
+only the KV cache differs (vLLM paged cache via block tables). Memory knobs matched to the bare
+bring-up: `--max-num-seqs 1`, `--max-model-len 2048`, `--num-gpu-blocks-override 512`
+(4 KV-cache groups x 64 blocks of 32 tokens per sequence, 2x), one prefill bucket (1024) and one
+decode bucket (1).
+
+| | Bare compiled (R2) | vLLM |
+|---|---|---|
+| Prompt | 34 tokens | 34 tokens |
+| TTFT | 0.371 s | 0.312 s |
+| Decode | 15.5 tok/s | 9.3 tok/s |
+| Startup | 640 s warmup | 740 s load + compile + warmup |
+| Answer | correct | correct, same explanation (bits as switches, qubits as spinning coins, superposition, entanglement) |
+
+Decode is slower: each step reads the whole cached context through the block table in plain PyTorch.
