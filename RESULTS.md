@@ -200,3 +200,43 @@ Job `muse-glimmer-30b-video-job.yaml` @ 55271dd: V5 correctness gate, then
 - Fix for the next run: `NEURON_RT_INSPECT_DEVICE_PROFILE=session` (required for native PyTorch)
   gives a device `.ntff` from the real run with real inputs; it is paired with the stage NEFF by
   content hash. `capture` also gets `--ignore-exec-errors`.
+
+## Vision-path profile, attempt 2 (2026-10-22) — pairs captured, stage time reconciled
+
+Commit 822a759. Artifacts: `s3://621547421844-ap-southeast-4/muse_glimmer/runs/vision_profile_822a75939600_20261022_061513*.tar.gz`.
+Vision tower alone, TP=1, one NeuronCore, video grid 4x20x26 (2080 patches, 520 tokens).
+
+**Stage time vs NEFF time.** The vision stage is ONE NEFF (id `63e4a86ff3348c02`, 8 MB).
+
+| Measure | Value |
+|---|---|
+| Wall time per call, clean (no profiler), median of 10 | 262.95 ms |
+| Device time of the one NEFF execution (single-io capture) | 262.05 ms |
+| Host overhead per call (wall - device) | ~0.9 ms (0.3%) |
+| Session trace: 4 executions (1 warmup + 3 timed) | 1054.0 ms total = 263.5 ms each |
+
+So wall time is the NEFF: the whole optimization target is inside this graph, not launch/host.
+Inside V5 (TP=2) the same vision path took 0.159 s of TTFT.
+
+**Inside the NEFF (capture pair, the complete trace).** Class COMPUTE (engine-mix gate): tensor 63%,
+vector 73%, DMA 69%, gpsimd 18% busy, no idle stall; 1.61M matmul instructions. MFU ~15% (session
+summary-text) — engines are busy but matmuls run far below peak. DMA moved 69 GB in 262 ms, mostly
+hardware-dynamic `[128 1]` columns between SBUF and VIRTUAL (25.5 GB + 17.2 GB).
+Op attribution is coarse (fused graph): MATMUL/LDWEIGHTS tagged `muse_compile.py:75`
+(attention output projection), softmax-like ops (ACTIVATE/TENSOR_TENSOR/TENSOR_REDUCE) at
+`muse_compile.py:73` (the masked SDPA) in the session pair and at the vision MLP lines in the capture.
+Rotary (`rotate_half` concat/negate + fp32 casts) shows up as small DMA copies.
+
+**Caveats.** The session trace (4.75 GB) is truncated: 2.45M matmuls for 4 executions vs 1.61M for
+one in the capture, and only 1.9 GB of DMA. Use it for execution times only; use the capture pair
+for instruction stats. Vision check TP=1 device vs stock eager CPU bf16: cosine 0.994192.
+
+**Hypothesis to A/B (not yet measured).** For video every frame is its own attention segment
+(4 x 520 tokens), but the fullgraph patch runs ONE 2080x2080 masked SDPA per layer: ~4x the
+attention matmuls and softmax work of per-segment attention, and 2080^2 x 16 heads of scores that
+likely spill (the VIRTUAL traffic). Equal-size segments can run as a batched SDPA over
+(segments, heads, 520, 64) with static shapes — no graph break, no kernel.
+
+**Run timing (83.4 min end to end):** V5 rung 14.2 min; profile warmup 1.5, clean 1.1,
+session device profile 7.6, system perfetto 15.1, per-NEFF capture 11.7, upload bundle 4.0,
+parquet 18.9, archive 8.4 (4.7 GB session trace).
