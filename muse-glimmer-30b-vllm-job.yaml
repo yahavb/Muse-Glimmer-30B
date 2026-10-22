@@ -76,7 +76,7 @@ spec:
                 --host 127.0.0.1 --port 8000 \
                 --tensor-parallel-size "$TP_DEGREE" --max-model-len "$MAX_MODEL_LEN" \
                 --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
-                --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+                --num-gpu-blocks-override "$NUM_GPU_BLOCKS" \
                 --additional-config "$ADDITIONAL_CONFIG" > >(tee /tmp/vllm_server.log) 2>&1 &
               SERVER=$!
               for _ in $(seq 1 720); do  # up to 2h for compile
@@ -140,21 +140,20 @@ spec:
               value: "0"
             - name: TP_DEGREE
               value: "2"
+            # Memory knobs matched to the bare bring-up (TP=2, m-lnc2): one sequence at a
+            # time, context = prompt + 256 new tokens (text 34, image 289, video 584).
             - name: MAX_MODEL_LEN
-              value: "4096"
+              value: "2048"
             - name: MAX_NUM_SEQS
-              value: "4"
+              value: "1"
             - name: MAX_NUM_BATCHED_TOKENS
               value: "1024"
-            # per core: 36 GB HBM, 25.95 GB weights (TP=2). KV budget = util * HBM - weights.
-            # 0.92 (default) gave 7.18 GB of KV and left too little for the NEFF's scratch
-            # (load failed: Allocation Failure). 0.78 -> ~2.1 GB KV (need ~0.44 GB: 4 seqs x
-            # 4096 tokens x 26.6 KB) and ~5 GB more for scratch.
-            - name: GPU_MEMORY_UTILIZATION
-              value: "0.78"
+            # exact KV: 2048 tokens / 32-token blocks = 64 blocks; 128 for headroom
+            - name: NUM_GPU_BLOCKS
+              value: "128"
             # few buckets -> few NEFFs -> shorter first compile
             - name: ADDITIONAL_CONFIG
-              value: '{"neuron_config": {"num_batched_tokens_buckets": [256, 1024], "num_seqs_buckets": [1, 4]}}'
+              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}}'
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
