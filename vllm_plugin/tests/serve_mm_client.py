@@ -71,8 +71,10 @@ def ask(label, text, image=None, video=None):
     n = usage.get("completion_tokens", 0)
     ttft = (t_first or t_end) - t0
     dec = t_end - (t_first or t_end)
+    e2e = t_end - t0
     print(f"REQ {label}: prompt_tokens={usage.get('prompt_tokens')} completion_tokens={n} TTFT={ttft:.3f}s "
-          f"decode={(n - 1) / dec if dec > 0 and n > 1 else 0:.1f} tok/s")
+          f"decode={(n - 1) / dec if dec > 0 and n > 1 else 0:.1f} tok/s "
+          f"e2e={e2e:.2f}s ({n / e2e if e2e > 0 else 0:.1f} tok/s)")
     return "".join(parts)
 
 
