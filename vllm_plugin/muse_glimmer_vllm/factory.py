@@ -10,6 +10,12 @@ from vllm_neuron.model.neuron_config import NeuronConfig
 class MuseGlimmerForConditionalGeneration(nn.Module):
     """Factory: validates config, returns the implementation (phase 1: text only)."""
 
+    # vLLM inspects the registered class when it builds ModelConfig (in the API process,
+    # before any Neuron worker exists) and rejects `--runner generate` without this flag.
+    # vllm-neuron's own models get past that check differently: they are registered later,
+    # in the worker, so vLLM inspects its built-in GPU class instead.
+    is_text_generation_model = True
+
     def __init__(self, hf_config: PretrainedConfig, neuron_config: NeuronConfig | None) -> None:
         super().__init__()
         self._model = self.from_configs(hf_config, neuron_config)
