@@ -1,5 +1,5 @@
 # Muse-Glimmer-30B served with vLLM Neuron (plugin 0.29.0.1.2.0, SDK 2.33) on trn3, TP=2.
-# Phase 1: text only. The model comes from this repo's out-of-tree plugin
+# Phase 2: text + images (fixed 448x448, the validated vision graph); video next. The model comes from this repo's out-of-tree plugin
 # (vllm_plugin/, registered through vllm.general_plugins) — vllm-neuron is unchanged.
 #
 # Flow: clone repo -> install plugin -> download weights -> vllm serve (bound to 127.0.0.1, so
@@ -76,7 +76,7 @@ spec:
                 --host 127.0.0.1 --port 8000 \
                 --tensor-parallel-size "$TP_DEGREE" --max-model-len "$MAX_MODEL_LEN" \
                 --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
-                --num-gpu-blocks-override "$NUM_GPU_BLOCKS" \
+                --num-gpu-blocks-override "$NUM_GPU_BLOCKS" --limit-mm-per-prompt '{"image": 1}' \
                 --additional-config "$ADDITIONAL_CONFIG" > >(tee /tmp/vllm_server.log) 2>&1 &
               SERVER=$!
               for _ in $(seq 1 720); do  # up to 2h for compile
@@ -87,9 +87,9 @@ spec:
               curl -sf http://127.0.0.1:8000/health >/dev/null || { echo "SERVER NOT READY — engine errors:"; grep -nE "ERROR|Error|error:" /tmp/vllm_server.log | grep -v APIServer | head -60; exit 1; }
               echo "server ready"; grep -iE "warmup|compil|bucket|NEFF|KV cache|blocks" /tmp/vllm_server.log | tail -15 || true
 
-              t_mark "smoke client (2 greedy requests)"
-              python3 vllm_plugin/tests/serve_smoke_client.py --url http://127.0.0.1:8000 \
-                --model meta-models/Muse-Glimmer-30B --max-tokens 256 --runs 2 || echo "CLIENT FAILED"
+              t_mark "client: text -> image (+cases) -> text"
+              python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
+                --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
               t_mark ""
               kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
               echo "════════ SERVER LOG (errors / tail) ════════"
@@ -135,7 +135,7 @@ spec:
             - name: REPO_URL
               value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
             - name: BRANCH
-              value: "exp/vllm-phase1"
+              value: "exp/vllm-phase2"
             - name: CPU_CHECK
               value: "0"
             - name: TP_DEGREE
@@ -154,7 +154,7 @@ spec:
               value: "512"
             # few buckets -> few NEFFs -> shorter first compile
             - name: ADDITIONAL_CONFIG
-              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}}'
+              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024]}}'
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:

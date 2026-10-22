@@ -1,0 +1,2 @@
+[vllm.general_plugins]
+muse_glimmer = muse_glimmer_vllm:register

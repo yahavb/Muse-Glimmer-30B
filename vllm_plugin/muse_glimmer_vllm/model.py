@@ -20,6 +20,7 @@ Muse-Glimmer specifics (as in HF MuseGlimmerTextModel):
 """
 
 import logging
+import math
 
 import torch
 from torch import nn
@@ -28,6 +29,7 @@ from vllm.distributed.parallel_state import get_tp_group
 
 import vllm_neuron.functional as NF
 import vllm_neuron.nn as neuron_nn
+from vllm_neuron.functional.merge_multimodal_embeddings import _merge_multimodal_embeddings_torch
 from vllm_neuron.model.kv_cache import KVSpec, LayerSpec, paged_slot_indices
 from vllm_neuron.model.neuron_config import NeuronConfig
 from vllm_neuron.nn.embedding import VocabDimShardedEmbedding
@@ -320,13 +322,22 @@ class MuseGlimmerTextModel(nn.Module):
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps, config.torch_dtype)
         self.rotary_emb = RotaryEmbedding(config)
 
-    def forward(self, input_ids, positions, attn_metadata, rank=None, inputs_embeds=None, is_token_ids=None):
+    def forward(self, input_ids, positions, attn_metadata, rank=None, inputs_embeds=None, is_token_ids=None,
+                encoder_embedding_buffer=None, encoder_block_ids=None, encoder_positions=None):
         md = attn_metadata["layers.0.self_attn"]
         is_prefill = md["max_query_len"] > md["decode_token_threshold"]
         sp = is_prefill  # sequence parallel in prefill, like the Qwen3 template
         h = self.embed_tokens(input_ids, scatter_tokens=sp, rank=rank)
         h = NF.merge_prompt_embeds(h, inputs_embeds, is_token_ids)
         h = _rms(h, self.config.rms_norm_eps).to(h.dtype)  # <-- MUSE: weight-less embedding norm
+        # Image embeddings replace the placeholder positions AFTER the embedding norm, as in
+        # HF MuseGlimmerModel.forward (normed embed, then masked_scatter of image features).
+        # Plain-PyTorch reference of the plugin's merge (gather cache blocks, scatter by position).
+        if (is_prefill and encoder_embedding_buffer is not None and encoder_block_ids is not None
+                and encoder_positions is not None):
+            h, _ = _merge_multimodal_embeddings_torch(
+                h, encoder_embedding_buffer, encoder_block_ids, encoder_positions,
+                rank if rank is not None else 0)
         pos_emb = self.rotary_emb(positions, device=h.device, dtype=h.dtype)
         for layer in self.layers:
             h = layer(h, positions, pos_emb, attn_metadata, is_prefill)
@@ -337,12 +348,23 @@ class MuseGlimmerTextModel(nn.Module):
 
 
 class MuseGlimmerForCausalLM(nn.Module):
-    """Text-only Muse-Glimmer for vLLM Neuron (phase 1: no vision tower)."""
+    """Muse-Glimmer for vLLM Neuron: text decoder + (optional) vision encoder for images."""
 
-    def __init__(self, config: MuseGlimmerTextConfig):
+    def __init__(self, config: MuseGlimmerTextConfig, hf_config=None, encoder_neuron_config=None):
         super().__init__()
         self.config = config
         self.model = MuseGlimmerTextModel(config)
+        self.encoder_neuron_config = encoder_neuron_config
+        self.visual = None
+        if hf_config is not None and getattr(hf_config, "vision_config", None) is not None:
+            from .vision import IMAGE_GRID, MuseGlimmerVisionEncoder, precompute_vision_kwargs
+
+            # Built on CPU (the runner builds the model under the meta device): its
+            # non-persistent buffers (vision RoPE inv_freq) must hold real values.
+            # Replicated on every rank, like the validated one-core vision run.
+            with torch.device("cpu"):
+                self.visual = MuseGlimmerVisionEncoder(hf_config).to(config.torch_dtype)
+                self._vision_meta = precompute_vision_kwargs(self.visual.tower, torch.tensor([IMAGE_GRID]))
         self.tp_group = get_tp_group()
         self.world_size = self.tp_group.world_size
         self.rank = self.tp_group.rank_in_group
@@ -361,7 +383,8 @@ class MuseGlimmerForCausalLM(nn.Module):
     @torch.no_grad()
     def forward(self, input_ids, positions, inputs_embeds=None, is_token_ids=None, attn_metadata=None,
                 sampling_positions=None, sampling_params=None, spec_decode_metadata=None,
-                logit_mask=None, rank=None, **kwargs):
+                logit_mask=None, rank=None, encoder_embedding_buffer=None, encoder_block_ids=None,
+                encoder_positions=None, **kwargs):
         if spec_decode_metadata is not None:
             raise NotImplementedError("speculative decoding is not supported for Muse-Glimmer yet")
         positions = positions.to(torch.int32)
@@ -371,7 +394,9 @@ class MuseGlimmerForCausalLM(nn.Module):
         if is_prefill and (T <= self.world_size or T % self.world_size != 0):
             raise ValueError(f"Prompt length ({T}) must be > and divisible by world_size ({self.world_size}) for SP.")
         h = self.model(input_ids, positions, attn_metadata=attn_metadata, rank=rank,
-                       inputs_embeds=inputs_embeds, is_token_ids=is_token_ids)
+                       inputs_embeds=inputs_embeds, is_token_ids=is_token_ids,
+                       encoder_embedding_buffer=encoder_embedding_buffer,
+                       encoder_block_ids=encoder_block_ids, encoder_positions=encoder_positions)
         if not is_prefill and md["max_query_len"] == 1 and h.shape[0] == sampling_positions.shape[0]:
             h_logits = h
         else:
@@ -388,8 +413,52 @@ class MuseGlimmerForCausalLM(nn.Module):
         return sampled, gathered
 
     @classmethod
-    def from_configs(cls, hf_config: PretrainedConfig, neuron_config: NeuronConfig):
-        return cls(MuseGlimmerTextConfig.from_configs(hf_config, neuron_config))
+    def from_configs(cls, hf_config: PretrainedConfig, neuron_config: NeuronConfig, encoder_neuron_config=None):
+        return cls(MuseGlimmerTextConfig.from_configs(hf_config, neuron_config), hf_config, encoder_neuron_config)
+
+    # ── vision: runner hooks (vllm-neuron VLM contract) ──
+
+    def get_encoder(self):
+        return self.visual
+
+    def _vision_num_blocks(self, bucket, enc):
+        # the runner's write_block_ids length for a bucket (neuron_worker encoder warmup)
+        return math.ceil(math.ceil(bucket / enc.encoder_attention_block_size) / enc.dp_size) * enc.dp_size
+
+    def build_encoder_synthetic_inputs(self, bucket, encoder_neuron_config, device):
+        """Warmup inputs for the vision graph: the fixed grid's real metadata + zero pixels."""
+        from .vision import IMAGE_GRID
+
+        n_patches = IMAGE_GRID[0] * IMAGE_GRID[1] * IMAGE_GRID[2]
+        patch_dim = self.visual.tower.patch_embedder.patch_embedding.in_features
+        kw = {k: v.to(device) for k, v in self._vision_meta.items()}
+        kw["pixel_values"] = torch.zeros(n_patches, patch_dim, dtype=torch.float32, device=device)
+        return kw
+
+    def embed_multimodal(self, encoder_cache=None, mm_hashes=None, image_pixel_values=None,
+                         image_feature_sizes=None, video_pixel_values=None, **kwargs):
+        """Encode images into the on-device encoder cache, one image per vision-graph call."""
+        if video_pixel_values is not None:
+            raise NotImplementedError("Muse-Glimmer video on vLLM Neuron is not enabled yet")
+        if image_pixel_values is None:
+            raise ValueError("embed_multimodal: no image_pixel_values")
+        from .vision import IMAGE_GRID
+
+        items = list(image_pixel_values) if not isinstance(image_pixel_values, torch.Tensor) or \
+            image_pixel_values.dim() == 3 else [image_pixel_values]
+        assert len(items) == len(mm_hashes), f"{len(items)} images vs {len(mm_hashes)} hashes"
+        n_patches = IMAGE_GRID[0] * IMAGE_GRID[1] * IMAGE_GRID[2]
+        n_embed = n_patches // self.visual.merge_factor
+        enc = self.encoder_neuron_config
+        num_blocks = self._vision_num_blocks(n_patches, enc)
+        device = next(self.visual.parameters()).device
+        meta = {k: v.to(device) for k, v in self._vision_meta.items()}
+        for mm_hash, pv in zip(mm_hashes, items):
+            assert tuple(pv.shape[-2:]) == (n_patches, pv.shape[-1]), f"image pixels {tuple(pv.shape)} != fixed grid"
+            blocks = encoder_cache.allocate(mm_hash, encoder_cache.dense_tokens_per_block(n_embed, encoder_cache.block_size))
+            write = torch.tensor(blocks + [encoder_cache.scratch_block_id] * (num_blocks - len(blocks)), dtype=torch.int64)
+            self.visual(pixel_values=pv.reshape(n_patches, -1).to(device), **meta,
+                        encoder_cache_buffer=encoder_cache.buffer, write_block_ids=write.to(device))
 
     # ── KV cache ──
 
@@ -429,6 +498,14 @@ class MuseGlimmerForCausalLM(nn.Module):
                 m[f"{d}.{n}.weight"] = f"{s}.{n}.weight"
             for n in ("gate_proj", "up_proj", "down_proj"):
                 m[f"{d}.mlp.{n}_weight"] = f"{s}.mlp.{n}.weight"
+        if self.visual is not None:  # replicated on every rank (no weight loader -> loaded as is)
+            for name, _ in self.visual.named_parameters():
+                if name.startswith("tower."):
+                    m[f"visual.{name}"] = "model.vision_tower." + name[len("tower."):]
+                elif name.startswith("adapter."):
+                    m[f"visual.{name}"] = "model.vision_adapter." + name[len("adapter."):]
+                elif name == "projection.weight":
+                    m["visual.projection.weight"] = "model.vision_projection.weight"
         state = SafetensorsCheckpoint(checkpoint_path, cache_dir).load_sharded_pipelined(
             self.rank, self.world_size, self, m, device).state_dict
         for k, t in state.items():
@@ -438,3 +515,5 @@ class MuseGlimmerForCausalLM(nn.Module):
         if missing:
             raise RuntimeError(f"checkpoint did not provide {len(missing)} parameters, e.g. {sorted(missing)[:4]}")
         self.load_state_dict(state, strict=False, assign=True)
+        if self.visual is not None:
+            self.visual.to(device)  # non-persistent buffers (vision RoPE) follow the weights
