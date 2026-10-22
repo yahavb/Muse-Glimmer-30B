@@ -178,3 +178,25 @@ timestamps -> grid 4x20x26 -> 520 video tokens, 584-token prompt, greedy, 256 ne
   are unaffected here, but this is the first place to look if video quality drops.
 - Token match vs V3: V4 133/256 (only text compiled), V5 27/256; V4 vs V5 27/256. Compile-to-compile
   variation (above) means single-run token matches are noisy.
+
+## Vision-path profile, attempt 1 (2026-10-22) — latency + system trace; no device pairs yet
+
+Job `muse-glimmer-30b-video-job.yaml` @ 55271dd: V5 correctness gate, then
+`scripts/neuron/profile_vision_job.sh` (vision tower alone, TP=1, one NeuronCore, video 4x20x26).
+
+| Item | Result |
+|---|---|
+| V5 gate (TP=2) | accurate description, 14.8 tok/s, TTFT 0.676 s (vision 0.454 s), warmup 669.8 s |
+| Vision NEFFs in the stage | **1** (9.0 MB) — the whole vision path is one graph |
+| Compile (empty cache) | 65.8 s |
+| **Clean vision latency, TP=1** | **median 263.13 ms** (min 263.07, max 264.53, n=10) |
+| Runtime inspector on | median 263.50 ms (+0.1% overhead); `trace_info.pb` written |
+| Vision check, TP=1 device vs stock eager CPU bf16 | cosine 0.994192, max abs diff 14.66 |
+| Per-NEFF `capture --single-io` | **0 / 1**: `execution 1 failed - unknown error (1204)` |
+| Device `.ntff` from the runtime inspector | none (`DEVICE_PROFILE=1` is sync-only) |
+
+- Vision time inside V5 varies run to run: 0.160 s (video attempt 2) vs 0.454 s here — same code,
+  fresh compile per pod. Compile-to-compile variation affects speed, not just tokens.
+- Fix for the next run: `NEURON_RT_INSPECT_DEVICE_PROFILE=session` (required for native PyTorch)
+  gives a device `.ntff` from the real run with real inputs; it is paired with the stage NEFF by
+  content hash. `capture` also gets `--ignore-exec-errors`.

@@ -3,9 +3,12 @@
 #
 #   [1/3] warmup: compile the vision graph into an EMPTY stage cache (+ correctness check)
 #   [2/3] clean run, no profiler: median of $ITERS calls = the real vision latency
-#   [3a]  runtime inspector (system + device profile) -> trace_info.pb bundle
-#   [4]   per-NEFF: capture --single-io + summary-json for every NEFF of the stage,
-#         ranking, top pairs preserved as pairs/rankNN_<id>_<MB>MB/{<id>.neff,<id>.ntff,summary.json}
+#   [3a]  runtime inspector: system trace (trace_info.pb) + DEVICE_PROFILE=session .ntff
+#         from the REAL run (real inputs). Native PyTorch needs "session": "1"/"model" mode is
+#         sync-only and writes no .ntff here. Session .ntff + its NEFF (matched by content
+#         hash to the stage NEFFs) -> pairs/rankNN_<id>_<MB>MB_session/
+#   [4]   per-NEFF: capture --single-io (zero-filled inputs, --ignore-exec-errors) + summary-json
+#         for every NEFF of the stage, ranking, extra pairs pairs/rankNN_<id>_<MB>MB/
 #   [5]   instruction level: parquet per pair -> pq_dma_report / pq_pad_shapes name the op
 #
 # The stage compiles nothing but the vision path, so every NEFF it writes is a vision NEFF.
@@ -91,7 +94,7 @@ T_CLEAN=$(median_of "$RESULTS/clean.txt")
 
 echo "=== [3a] RUNTIME INSPECTOR (system + device profile) -> trace_info.pb ==="
 SYSTRACE=/tmp/vision_systrace; rm -rf "$SYSTRACE"; mkdir -p "$SYSTRACE"
-NEURON_RT_INSPECT_ENABLE=1 NEURON_RT_INSPECT_SYSTEM_PROFILE=1 NEURON_RT_INSPECT_DEVICE_PROFILE=1 \
+NEURON_RT_INSPECT_ENABLE=1 NEURON_RT_INSPECT_SYSTEM_PROFILE=1 NEURON_RT_INSPECT_DEVICE_PROFILE=session \
 NEURON_RT_INSPECT_OUTPUT_DIR="$SYSTRACE" \
   "${BENCH[@]}" --warmup 1 --iters 3 2>&1 | tee "$RESULTS/profiled.txt" \
   | grep -E "median=|Error|Traceback" || echo "PROFILED RUN FAILED"
@@ -100,6 +103,30 @@ echo "  trace_info.pb count: $(find "$SYSTRACE" -name trace_info.pb | wc -l)"
 echo "  .ntff / .neff      : $(find "$SYSTRACE" -name '*.ntff' | wc -l) / $(find "$SYSTRACE" -name '*.neff' | wc -l)"
 RANKDIR=$(find "$SYSTRACE" -name trace_info.pb -printf '%s %h\n' 2>/dev/null | sort -n -r | head -1 | cut -d' ' -f2- || true)
 echo "  bundle rank dir    : ${RANKDIR:-none}"
+
+# Session pairs: real-input device trace + the NEFF it ran, joined in ONE dir.
+PAIRS="$RESULTS/pairs"; mkdir -p "$PAIRS"
+i=0
+SESSION_NTFF=$(find "$SYSTRACE" -name '*.ntff' -printf '%s %p\n' 2>/dev/null | sort -n -r | head -1 | cut -d' ' -f2- || true)
+if [ -n "$SESSION_NTFF" ]; then
+  echo "  session ntff: $SESSION_NTFF ($(wc -c < "$SESSION_NTFF") bytes)"
+  while read -r rn; do
+    rid=$(sha1sum "$rn" | cut -c1-16)
+    if [ -f "$NEFFS/$rid.neff" ]; then
+      i=$((i + 1))
+      mb=$(( $(wc -c < "$rn") / 1048576 ))
+      d="$PAIRS/$(printf 'rank%02d' "$i")_${rid}_${mb}MB_session"; mkdir -p "$d"
+      cp "$NEFFS/$rid.neff" "$d/"; cp "$SESSION_NTFF" "$d/$rid.ntff"
+      timeout 900 "$PROF" view -n "$d/$rid.neff" -s "$d/$rid.ntff" --output-format summary-json \
+        > "$d/summary.json" 2>"$d/summary.err" || true
+      echo "  session pair: $(basename "$d") summary-json $(wc -c < "$d/summary.json") bytes"
+    else
+      echo "  runtime NEFF $(basename "$rn") ($rid) is not a stage NEFF — not paired"
+    fi
+  done < <(find "$SYSTRACE" -name '*.neff' 2>/dev/null)
+else
+  echo "  no session .ntff written"
+fi
 
 echo "=== [3b] system timeline -> perfetto (WHEN graphs ran) ==="
 if [ -n "$RANKDIR" ]; then
@@ -116,7 +143,7 @@ for neff in "$NEFFS"/*.neff; do
   [ -f "$neff" ] || continue
   id=$(basename "$neff" .neff)
   ( cd "$POUT" && NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1 timeout 900 \
-      "$PROF" capture --single-io -n "$neff" -s "$POUT/$id.ntff" > "$POUT/$id.capture.log" 2>&1 ) \
+      "$PROF" capture --single-io --ignore-exec-errors -n "$neff" -s "$POUT/$id.ntff" > "$POUT/$id.capture.log" 2>&1 ) \
     || { echo "  $id capture rc=$? (tail: $(tail -1 "$POUT/$id.capture.log" 2>/dev/null))"; continue; }
   [ -s "$POUT/$id.ntff" ] || { echo "  $id: no ntff"; continue; }
   timeout 900 "$PROF" view -n "$neff" -s "$POUT/$id.ntff" --output-format summary-json \
@@ -127,9 +154,7 @@ echo "captured+viewed OK: $OK / $N_NEFF"
 python3 "$HERE/profile_all_neffs.py" "$POUT" 2>&1 | tee "$RESULTS/perneff_breakdown.txt" || echo "aggregation failed"
 python3 "$HERE/rank_neffs.py" "$POUT" 2>&1 | tee "$RESULTS/neff_ranking.txt" || echo "ranking failed"
 
-# Preserve the heaviest pairs, each .neff + its .ntff + summary in ONE dir.
-PAIRS="$RESULTS/pairs"; mkdir -p "$PAIRS"
-i=0
+# Preserve the heaviest capture pairs too, each .neff + its .ntff + summary in ONE dir.
 while read -r id; do
   [ -n "$id" ] && [ -s "$POUT/$id.ntff" ] || continue
   i=$((i + 1))
@@ -144,6 +169,7 @@ ls -d "$PAIRS"/rank* 2>/dev/null | sed 's/^/  /' || true
 TOP=$(ls -d "$PAIRS"/rank01_* 2>/dev/null | head -1 || true)
 if [ -n "$TOP" ]; then
   id=$(basename "$TOP" | cut -d_ -f2)
+  echo "  rank01 pair: $(basename "$TOP")"
   echo "═══ rank01 NEFF detail (summary-text) ═══"
   timeout 900 "$PROF" view -n "$TOP/$id.neff" -s "$TOP/$id.ntff" --output-format summary-text \
     2>/dev/null | tee "$RESULTS/rank01_summary.txt" | grep -E \
