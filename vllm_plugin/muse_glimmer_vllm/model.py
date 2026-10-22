@@ -28,8 +28,8 @@ from vllm.distributed.parallel_state import get_tp_group
 
 import vllm_neuron.functional as NF
 import vllm_neuron.nn as neuron_nn
-from nkilib.core.utils.common_types import NormType
 from vllm_neuron.functional.attention.attention_decode import _torch_attention_decode_impl
+from vllm_neuron.functional.attention.attention_decode_mask import _torch_gen_attention_decode_mask_impl
 from vllm_neuron.model.kv_cache import KVSpec, LayerSpec, paged_slot_indices
 from vllm_neuron.model.neuron_config import NeuronConfig
 from vllm_neuron.nn.embedding import VocabDimShardedEmbedding
@@ -92,6 +92,13 @@ class RotaryEmbedding(nn.Module):
         freqs = (inv_freq[:, None] @ positions[None, :].float()).transpose(0, 1)  # [T, Dh/2]
         emb = torch.cat((freqs, freqs), dim=-1)  # [T, Dh]
         return emb.cos().to(dtype=dtype), emb.sin().to(dtype=dtype)
+
+
+def _apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """x [T, N, Dh]; cos/sin [T, Dh]. rotate_half layout, like HF apply_rotary_pos_emb."""
+    half = x.shape[-1] // 2
+    rot = torch.cat((-x[..., half:], x[..., :half]), dim=-1)
+    return (x * cos[:, None, :] + rot * sin[:, None, :]).to(x.dtype)
 
 
 # ── attention ────────────────────────────────────────────────────────────────
@@ -165,22 +172,20 @@ class MuseGlimmerAttention(nn.Module):
         hidden_states = hidden_states.to(self.dtype)
         tokens = hidden_states.shape[0]
         q_gamma, k_gamma = self._qk_gammas(hidden_states.device)
-        cos_cache = sin_cache = None
-        if self.use_rope:
-            cos, sin = position_embeddings
-            cos_cache, sin_cache = cos.unsqueeze(0), sin.unsqueeze(0)
-
-        qkv = NF.qkv_proj(
-            hidden=hidden_states.unsqueeze(0), qkv_weights=self.qkv_proj_weight, bias=None,
-            d_head=self.head_dim, cos_cache=cos_cache, sin_cache=sin_cache,
-            num_q_heads=self.num_attention_heads_per_rank, num_kv_heads=self.num_key_value_heads_per_rank,
-            qk_norm_pre_rope_q_norm=NormType.RMS_NORM, qk_norm_pre_rope_k_norm=NormType.RMS_NORM,
-            qk_norm_pre_rope_eps=self.eps, qk_norm_pre_rope_q_gamma=q_gamma, qk_norm_pre_rope_k_gamma=k_gamma,
-        ).squeeze(0)
+        # QKV + weight-less Q/K RMSNorm (Q gamma = softmax scale) + RoPE in plain PyTorch.
+        # The fused NF.qkv_proj is untested with cos=None (NoPE layers) + QK-norm.
+        qkv = hidden_states @ self.qkv_proj_weight
         q, k, v = torch.tensor_split(qkv, self.qkv_split_indices, dim=-1)
-        q = q.view(tokens, self.num_attention_heads_per_rank, self.head_dim).transpose(0, 1)
-        k = k.view(tokens, self.num_key_value_heads_per_rank, self.head_dim).transpose(0, 1)
-        v = v.view(tokens, self.num_key_value_heads_per_rank, self.head_dim).transpose(0, 1)
+        q = q.view(tokens, self.num_attention_heads_per_rank, self.head_dim)
+        k = k.view(tokens, self.num_key_value_heads_per_rank, self.head_dim)
+        v = v.view(tokens, self.num_key_value_heads_per_rank, self.head_dim)
+        q = (_rms(q, self.eps) * q_gamma.float().view(1, 1, -1)).to(self.dtype)
+        k = (_rms(k, self.eps) * k_gamma.float().view(1, 1, -1)).to(self.dtype)
+        if self.use_rope:
+            cos, sin = position_embeddings  # [T, Dh]
+            q = _apply_rope(q, cos, sin)
+            k = _apply_rope(k, cos, sin)
+        q, k, v = q.transpose(0, 1), k.transpose(0, 1), v.transpose(0, 1)  # [N, T, Dh]
 
         md = attn_metadata[self.layer_name]
         block_size = md["block_size"]
@@ -252,9 +257,14 @@ class MuseGlimmerAttention(nn.Module):
             if off is not None:
                 pos_ids = torch.clamp(pos_ids - off.view(B, 1).expand(B, S).reshape(1, B * S), min=0)
             start = torch.clamp(pos_ids - self.sliding_window + 1, min=0).to(torch.float32)
-        mask = NF.gen_attention_decode_mask(
-            pos_ids=pos_ids.to(torch.float32), bs=B, q_head=self.num_attention_heads_per_rank,
-            s_active=S, s_prior=S_ctx, start_pos=start, block_len=md["block_size"])
+        # PyTorch mask builder (the NKI gen_mask kernel failed to trace for these shapes);
+        # same semantics as NF.gen_attention_decode_mask: causal triu among active tokens.
+        nq = self.num_attention_heads_per_rank
+        active = torch.triu(torch.ones(S, S, dtype=torch.float32, device=hidden_states.device))
+        active = active[:, None, None, :].expand(S, B, nq, S).contiguous()
+        mask = _torch_gen_attention_decode_mask_impl(
+            pos_ids.to(torch.float32), bs=B, q_head=nq, s_active=S, s_prior=S_ctx,
+            start_pos=start, block_len=md["block_size"], active_mask=active)
 
         attn, K_new, V_new = _torch_attention_decode_impl(
             X=X, X_hidden_dim_actual=self.hidden_size, rmsnorm_X_enabled=False,
