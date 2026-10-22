@@ -214,7 +214,12 @@ class MuseGlimmerAttention(nn.Module):
             slot_pos = slot_pos + md["swa_kv_pos_offset"].view(B, 1, 1).to(slot_pos.dtype)
         pos = positions.view(B, S, 1).to(slot_pos.dtype)  # [B, S, 1]
         valid = (block_table >= 0).repeat_interleave(bs, dim=1).view(B, 1, -1)
-        prior_ok = valid & (slot_pos < pos)  # cached tokens before each query
+        # Only tokens computed in EARLIER steps are in the cache: positions before this chunk's
+        # first token. The chunk's own K/V are written after this read, so its slots still hold
+        # stale data; they come from the new k/v below. (Decode: chunk = 1 token, so this is
+        # every earlier position.)
+        chunk_start = positions.view(B, S)[:, :1].to(slot_pos.dtype).view(B, 1, 1)
+        prior_ok = valid & (slot_pos < chunk_start) & (slot_pos < pos)
         new_pos = positions.view(B, 1, S).to(slot_pos.dtype)  # positions of the new tokens
         new_ok = new_pos <= pos  # causal among new tokens
         if self.sliding_window is not None:
