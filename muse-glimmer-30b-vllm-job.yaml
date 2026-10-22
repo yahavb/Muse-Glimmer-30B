@@ -148,9 +148,10 @@ spec:
               value: "1"
             - name: MAX_NUM_BATCHED_TOKENS
               value: "1024"
-            # exact KV: 2048 tokens / 32-token blocks = 64 blocks; 128 for headroom
+            # exact KV: 2048 tokens / 32-token blocks = 64 blocks per KV-cache group; vLLM
+            # makes 4 groups (log: per_group=[32,32,32,32]) -> 256 for one sequence; 512 = 2x
             - name: NUM_GPU_BLOCKS
-              value: "128"
+              value: "512"
             # few buckets -> few NEFFs -> shorter first compile
             - name: ADDITIONAL_CONFIG
               value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}}'
