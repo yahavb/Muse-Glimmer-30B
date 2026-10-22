@@ -1,621 +1,0 @@
-WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
-
-[notice] A new release of pip is available: 26.2.1 -> 26.2.2
-[notice] To update, run: pip install --upgrade pip
-WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
-
-[notice] A new release of pip is available: 26.2.1 -> 26.2.2
-[notice] To update, run: pip install --upgrade pip
-torch 2.14.0+cu130 torchvision 0.29.0+cu130 torch_neuronx 2.14.3.0.1+b1b6c66 transformers 5.20.2
-PROVENANCE code sha256:
-a79273242e64bb33dded3a894f7a461326d22f6dd87d8511478e2bc78a4e2782  /code/muse_compile.py
-ade46216e91e920394e69ff4f2fc02647b975c6de827bafad4d583e81f8f2a1c  /code/run_muse_glimmer.py
-Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s]Fetching 13 files:  15%|█▌        | 2/13 [00:00<00:00, 16.11it/s]Fetching 13 files:  85%|████████▍ | 11/13 [00:01<00:00,  5.41it/s]Fetching 13 files:  92%|█████████▏| 12/13 [00:06<00:00,  1.37it/s]Fetching 13 files: 100%|██████████| 13/13 [00:22<00:00,  2.96s/it]Fetching 13 files: 100%|██████████| 13/13 [00:22<00:00,  1.73s/it]
-/tmp/hf_cache/hub/models--meta-models--Muse-Glimmer-30B/snapshots/7af58019cf472021aae5480731c9ae8e141b56c7
-████ RUNG R3  flags:  ████
-W1021 16:51:34.855000 188 site-packages/torch/distributed/run.py:982] 
-W1021 16:51:34.855000 188 site-packages/torch/distributed/run.py:982] *****************************************
-W1021 16:51:34.855000 188 site-packages/torch/distributed/run.py:982] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
-W1021 16:51:34.855000 188 site-packages/torch/distributed/run.py:982] *****************************************
-/workspace/torch_neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
-  _warn_trace_cache_once()
-/workspace/torch_neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
-  _warn_trace_cache_once()
-/usr/local/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py:411: FutureWarning: Passing `tp_plan` directly to `from_pretrained` is deprecated and will be removed in v5.18. Pass it in `distributed_config=DistributedConfig(tp_plan=...)` instead.
-  return model_class.from_pretrained(
-/usr/local/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py:411: FutureWarning: Passing `tp_plan` directly to `from_pretrained` is deprecated and will be removed in v5.18. Pass it in `distributed_config=DistributedConfig(tp_plan=...)` instead.
-  return model_class.from_pretrained(
-Loading weights:   0%|          | 0/1436 [00:00<?, ?it/s]Loading weights:   0%|          | 0/1436 [00:00<?, ?it/s]Loading weights:   0%|          | 1/1436 [00:00<04:52,  4.91it/s]Loading weights:   0%|          | 1/1436 [00:00<05:19,  4.49it/s]Loading weights:   0%|          | 5/1436 [00:07<38:29,  1.61s/it]Loading weights:   1%|          | 12/1436 [00:07<12:28,  1.90it/s]Loading weights:   1%|          | 12/1436 [00:08<17:18,  1.37it/s]Loading weights:   2%|▏         | 24/1436 [00:15<13:44,  1.71it/s]Loading weights:   2%|▏         | 32/1436 [00:15<08:40,  2.70it/s]Loading weights:   3%|▎         | 40/1436 [00:15<05:44,  4.05it/s]Loading weights:   3%|▎         | 50/1436 [00:15<03:36,  6.40it/s]Loading weights:   4%|▍         | 60/1436 [00:15<02:23,  9.56it/s]Loading weights:   5%|▌         | 72/1436 [00:15<01:33, 14.51it/s]Loading weights:   6%|▌         | 81/1436 [00:15<01:10, 19.10it/s]Loading weights:   6%|▋         | 90/1436 [00:15<00:54, 24.56it/s]Loading weights:   1%|▏         | 19/1436 [00:15<20:37,  1.15it/s]Loading weights:   2%|▏         | 28/1436 [00:16<11:14,  2.09it/s]Loading weights:   7%|▋         | 99/1436 [00:16<00:44, 30.26it/s]Loading weights:   3%|▎         | 38/1436 [00:16<06:35,  3.53it/s]Loading weights:   8%|▊         | 112/1436 [00:16<00:34, 38.91it/s]Loading weights:   3%|▎         | 48/1436 [00:16<04:11,  5.53it/s]Loading weights:   9%|▊         | 124/1436 [00:16<00:28, 46.16it/s]Loading weights:   4%|▍         | 58/1436 [00:16<02:47,  8.22it/s]Loading weights:   9%|▉         | 134/1436 [00:16<00:24, 52.41it/s]Loading weights:   5%|▍         | 66/1436 [00:16<02:06, 10.87it/s]Loading weights:   5%|▌         | 76/1436 [00:16<01:28, 15.39it/s]Loading weights:  10%|█         | 148/1436 [00:16<00:21, 59.31it/s]Loading weights:  11%|█         | 157/1436 [00:16<00:19, 64.10it/s]Loading weights:   6%|▌         | 88/1436 [00:16<01:01, 21.92it/s]Loading weights:  12%|█▏        | 168/1436 [00:16<00:18, 67.28it/s]Loading weights:   7%|▋         | 100/1436 [00:16<00:46, 28.68it/s]Loading weights:  12%|█▏        | 178/1436 [00:17<00:17, 73.34it/s]Loading weights:   8%|▊         | 110/1436 [00:17<00:37, 35.57it/s]Loading weights:  13%|█▎        | 187/1436 [00:17<00:18, 68.01it/s]Loading weights:   8%|▊         | 120/1436 [00:17<00:30, 42.81it/s]Loading weights:  14%|█▎        | 196/1436 [00:17<00:17, 72.06it/s]Loading weights:   9%|▉         | 130/1436 [00:17<00:25, 50.28it/s]Loading weights:  14%|█▍        | 208/1436 [00:17<00:16, 73.15it/s]Loading weights:  10%|▉         | 139/1436 [00:17<00:24, 52.97it/s]Loading weights:  10%|█         | 148/1436 [00:17<00:21, 58.73it/s]Loading weights:  15%|█▌        | 218/1436 [00:17<00:16, 73.92it/s]Loading weights:  16%|█▌        | 228/1436 [00:17<00:15, 79.42it/s]Loading weights:  11%|█         | 158/1436 [00:17<00:20, 62.28it/s]Loading weights:  12%|█▏        | 168/1436 [00:17<00:18, 69.07it/s]Loading weights:  17%|█▋        | 238/1436 [00:17<00:15, 78.47it/s]Loading weights:  12%|█▏        | 178/1436 [00:17<00:17, 73.01it/s]Loading weights:  17%|█▋        | 247/1436 [00:17<00:15, 74.73it/s]Loading weights:  18%|█▊        | 256/1436 [00:18<00:16, 73.72it/s]Loading weights:  13%|█▎        | 187/1436 [00:18<00:18, 68.82it/s]Loading weights:  14%|█▎        | 196/1436 [00:18<00:16, 73.45it/s]Loading weights:  19%|█▊        | 266/1436 [00:18<00:15, 74.60it/s]Loading weights:  14%|█▍        | 205/1436 [00:18<00:16, 74.22it/s]Loading weights:  19%|█▉        | 276/1436 [00:18<00:14, 80.03it/s]Loading weights:  20%|█▉        | 286/1436 [00:18<00:14, 80.25it/s]Loading weights:  15%|█▌        | 216/1436 [00:18<00:16, 76.14it/s]Loading weights:  16%|█▌        | 226/1436 [00:18<00:15, 79.17it/s]Loading weights:  21%|██        | 295/1436 [00:18<00:15, 75.83it/s]Loading weights:  21%|██        | 304/1436 [00:18<00:15, 74.71it/s]Loading weights:  16%|█▋        | 235/1436 [00:18<00:16, 73.06it/s]Loading weights:  17%|█▋        | 244/1436 [00:18<00:15, 75.72it/s]Loading weights:  22%|██▏       | 314/1436 [00:18<00:14, 75.08it/s]Loading weights:  18%|█▊        | 254/1436 [00:18<00:15, 74.38it/s]Loading weights:  23%|██▎       | 328/1436 [00:19<00:14, 77.43it/s]Loading weights:  18%|█▊        | 264/1436 [00:19<00:14, 79.10it/s]Loading weights:  24%|██▎       | 340/1436 [00:19<00:14, 75.98it/s]Loading weights:  19%|█▉        | 274/1436 [00:19<00:14, 81.20it/s]Loading weights:  24%|██▍       | 350/1436 [00:19<00:14, 76.87it/s]Loading weights:  20%|█▉        | 283/1436 [00:19<00:15, 74.86it/s]Loading weights:  20%|██        | 292/1436 [00:19<00:15, 74.52it/s]Loading weights:  25%|██▌       | 364/1436 [00:19<00:13, 77.92it/s]Loading weights:  21%|██        | 302/1436 [00:19<00:15, 75.44it/s]Loading weights:  26%|██▌       | 376/1436 [00:19<00:13, 77.50it/s]Loading weights:  22%|██▏       | 312/1436 [00:19<00:14, 79.75it/s]Loading weights:  27%|██▋       | 386/1436 [00:19<00:13, 77.30it/s]Loading weights:  22%|██▏       | 322/1436 [00:19<00:13, 82.10it/s]Loading weights:  28%|██▊       | 400/1436 [00:19<00:13, 78.34it/s]Loading weights:  23%|██▎       | 331/1436 [00:19<00:14, 74.73it/s]Loading weights:  24%|██▎       | 340/1436 [00:20<00:14, 75.03it/s]Loading weights:  29%|██▊       | 412/1436 [00:20<00:13, 76.62it/s]Loading weights:  24%|██▍       | 350/1436 [00:20<00:14, 77.13it/s]Loading weights:  29%|██▉       | 422/1436 [00:20<00:13, 76.97it/s]Loading weights:  25%|██▌       | 360/1436 [00:20<00:13, 78.82it/s]Loading weights:  30%|███       | 436/1436 [00:20<00:12, 77.95it/s]Loading weights:  26%|██▌       | 370/1436 [00:20<00:13, 81.16it/s]Loading weights:  31%|███       | 448/1436 [00:20<00:12, 78.44it/s]Loading weights:  26%|██▋       | 379/1436 [00:20<00:14, 74.87it/s]Loading weights:  32%|███▏      | 457/1436 [00:20<00:12, 79.61it/s]Loading weights:  27%|██▋       | 388/1436 [00:20<00:13, 76.94it/s]Loading weights:  33%|███▎      | 468/1436 [00:20<00:11, 81.18it/s]Loading weights:  28%|██▊       | 398/1436 [00:20<00:13, 76.46it/s]Loading weights:  28%|██▊       | 408/1436 [00:20<00:12, 80.33it/s]Loading weights:  33%|███▎      | 478/1436 [00:20<00:11, 79.90it/s]Loading weights:  29%|██▉       | 418/1436 [00:21<00:12, 82.60it/s]Loading weights:  34%|███▍      | 487/1436 [00:21<00:12, 75.87it/s]Loading weights:  30%|██▉       | 427/1436 [00:21<00:13, 75.23it/s]Loading weights:  35%|███▍      | 496/1436 [00:21<00:12, 75.04it/s]Loading weights:  30%|███       | 436/1436 [00:21<00:12, 76.96it/s]Loading weights:  35%|███▌      | 506/1436 [00:21<00:12, 75.47it/s]Loading weights:  36%|███▌      | 516/1436 [00:21<00:11, 81.07it/s]Loading weights:  31%|███       | 446/1436 [00:21<00:13, 75.34it/s]Loading weights:  37%|███▋      | 526/1436 [00:21<00:11, 79.97it/s]Loading weights:  32%|███▏      | 460/1436 [00:21<00:12, 79.08it/s]Loading weights:  37%|███▋      | 535/1436 [00:21<00:11, 75.83it/s]Loading weights:  33%|███▎      | 469/1436 [00:21<00:12, 78.22it/s]Loading weights:  38%|███▊      | 544/1436 [00:21<00:11, 75.59it/s]Loading weights:  33%|███▎      | 480/1436 [00:21<00:12, 79.17it/s]Loading weights:  39%|███▊      | 554/1436 [00:21<00:11, 75.89it/s]Loading weights:  34%|███▍      | 490/1436 [00:21<00:11, 81.25it/s]Loading weights:  39%|███▉      | 564/1436 [00:22<00:10, 81.51it/s]Loading weights:  35%|███▍      | 499/1436 [00:22<00:12, 74.91it/s]Loading weights:  40%|███▉      | 574/1436 [00:22<00:10, 80.22it/s]Loading weights:  35%|███▌      | 508/1436 [00:22<00:11, 78.14it/s]Loading weights:  41%|████      | 583/1436 [00:22<00:11, 75.96it/s]Loading weights:  36%|███▌      | 517/1436 [00:22<00:11, 77.65it/s]Loading weights:  41%|████      | 592/1436 [00:22<00:11, 76.13it/s]Loading weights:  37%|███▋      | 528/1436 [00:22<00:11, 79.10it/s]Loading weights:  42%|████▏     | 601/1436 [00:22<00:10, 78.18it/s]Loading weights:  37%|███▋      | 538/1436 [00:22<00:11, 80.99it/s]Loading weights:  43%|████▎     | 612/1436 [00:22<00:10, 80.19it/s]Loading weights:  38%|███▊      | 547/1436 [00:22<00:11, 74.43it/s]Loading weights:  43%|████▎     | 622/1436 [00:22<00:10, 79.90it/s]Loading weights:  39%|███▊      | 556/1436 [00:22<00:11, 77.24it/s]Loading weights:  44%|████▍     | 631/1436 [00:22<00:11, 71.27it/s]Loading weights:  40%|███▉      | 568/1436 [00:23<00:13, 66.60it/s]Loading weights:  41%|████      | 588/1436 [00:23<00:09, 92.36it/s]Loading weights:  42%|████▏     | 600/1436 [00:23<00:08, 95.37it/s]Loading weights:  43%|████▎     | 611/1436 [00:23<00:08, 96.93it/s]Loading weights:  43%|████▎     | 622/1436 [00:23<00:08, 91.57it/s]Loading weights:  46%|████▋     | 665/1436 [00:27<01:10, 10.99it/s]Loading weights:  50%|█████     | 723/1436 [00:27<00:27, 26.34it/s]Loading weights:  44%|████▍     | 632/1436 [00:27<01:38,  8.13it/s]Loading weights:  55%|█████▍    | 785/1436 [00:27<00:13, 48.37it/s]Loading weights:  47%|████▋     | 674/1436 [00:27<00:37, 20.41it/s]Loading weights:  59%|█████▉    | 846/1436 [00:28<00:07, 76.25it/s]Loading weights:  51%|█████▏    | 738/1436 [00:28<00:15, 45.51it/s]Loading weights:  63%|██████▎   | 906/1436 [00:28<00:04, 111.08it/s]Loading weights:  56%|█████▌    | 804/1436 [00:28<00:07, 79.00it/s]Loading weights:  67%|██████▋   | 964/1436 [00:28<00:03, 151.14it/s]Loading weights:  60%|██████    | 866/1436 [00:28<00:04, 117.95it/s]Loading weights:  71%|███████▏  | 1026/1436 [00:28<00:02, 201.71it/s]Loading weights:  64%|██████▍   | 923/1436 [00:28<00:03, 160.29it/s]Loading weights:  76%|███████▌  | 1088/1436 [00:28<00:01, 258.24it/s]Loading weights:  68%|██████▊   | 978/1436 [00:28<00:02, 206.17it/s]Loading weights:  80%|███████▉  | 1146/1436 [00:28<00:00, 308.56it/s]Loading weights:  72%|███████▏  | 1038/1436 [00:28<00:01, 262.66it/s]Loading weights:  84%|████████▍ | 1203/1436 [00:28<00:00, 353.97it/s]Loading weights:  77%|███████▋  | 1101/1436 [00:28<00:01, 319.68it/s]Loading weights:  88%|████████▊ | 1263/1436 [00:28<00:00, 404.90it/s]Loading weights:  81%|████████  | 1162/1436 [00:28<00:00, 374.33it/s]Loading weights:  92%|█████████▏| 1320/1436 [00:28<00:00, 437.29it/s]Loading weights:  85%|████████▌ | 1221/1436 [00:28<00:00, 413.95it/s]Loading weights:  89%|████████▉ | 1278/1436 [00:29<00:00, 449.91it/s]Loading weights:  97%|█████████▋| 1390/1436 [00:29<00:00, 481.77it/s]Loading weights: 100%|██████████| 1436/1436 [00:29<00:00, 49.32it/s] 
-Loading weights:  94%|█████████▎| 1344/1436 [00:29<00:00, 491.48it/s]Loading weights:  98%|█████████▊| 1407/1436 [00:29<00:00, 522.41it/s]Loading weights: 100%|██████████| 1436/1436 [00:29<00:00, 49.08it/s] 
-RUN CONFIG: mode=eager image=https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg prompt_tokens=289 image_grid_thw=[[1, 32, 32]]
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 106, in run_pipeline_with_repro_report
-[rank0]:     pm.run(module.operation)
-[rank0]:     ~~~~~~^^^^^^^^^^^^^^^^^^
-[rank0]: torch_mlir._mlir_libs._site_initialize.<locals>.MLIRError: Failure while executing pass pipeline
-
-[rank0]: The above exception was the direct cause of the following exception:
-
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/code/run_muse_glimmer.py", line 128, in <module>
-[rank0]:     model.generate(**inputs, **gen_kwargs)
-[rank0]:     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
-[rank0]:     return func(*args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/generation/utils.py", line 2891, in generate
-[rank0]:     model_kwargs = self._maybe_prepare_encoder_kwargs_for_generation(
-[rank0]:         inputs_tensor, model_kwargs, model_input_name, generation_config
-[rank0]:     )
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/generation/utils.py", line 978, in _maybe_prepare_encoder_kwargs_for_generation
-[rank0]:     return self._prepare_multimodal_encoder_kwargs_for_generation(model_kwargs)
-[rank0]:            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/generation/utils.py", line 1048, in _prepare_multimodal_encoder_kwargs_for_generation
-[rank0]:     model_kwargs["mm_encoder_outputs"][modality] = encoder_fn(**encoder_kwargs)
-[rank0]:                                                    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/generic.py", line 943, in wrapper
-[rank0]:     output = func(self, *args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 920, in get_image_features
-[rank0]:     vision_outputs = self.vision_tower(
-[rank0]:         pixel_values=pixel_values,
-[rank0]:         grid_thw=image_grid_thw,
-[rank0]:         **kwargs,
-[rank0]:     )
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank0]:     return self._call_impl(*args, **kwargs)
-[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank0]:     return forward_call(*args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/generic.py", line 1081, in wrapper
-[rank0]:     output = func(self, *args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/output_capturing.py", line 287, in wrapper
-[rank0]:     outputs = func(self, *args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 853, in forward
-[rank0]:     inputs_embeds = self.patch_embedder(pixel_values, grid_thw, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank0]:     return self._call_impl(*args, **kwargs)
-[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank0]:     return forward_call(*args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 696, in forward
-[rank0]:     interp_indices, interp_weights = get_vision_interpolation_indices_and_weights(
-[rank0]:                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         grid_thw,
-[rank0]:         ^^^^^^^^^
-[rank0]:     ...<5 lines>...
-[rank0]:         kwargs=kwargs,
-[rank0]:         ^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/vision_utils.py", line 276, in get_vision_interpolation_indices_and_weights
-[rank0]:     heights = torch.repeat_interleave(grid_thw[:, 1], counts)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank0]:     return fn(*args, **kwargs)
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/operation_registry.py", line 336, in lower
-[rank0]:     lowering_result = kernel.lower(
-[rank0]:         *processed_new_args,
-[rank0]:     ...<8 lines>...
-[rank0]:         **new_kwargs,
-[rank0]:     )
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank0]:     return fn(*args, **kwargs)
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1788, in lower
-[rank0]:     ) = self._get_or_compile_hlo(
-[rank0]:         ~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         processed_inputs,
-[rank0]:         ^^^^^^^^^^^^^^^^^
-[rank0]:     ...<3 lines>...
-[rank0]:         use_complex_decomposition=use_complex_decomposition,
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1411, in _get_or_compile_hlo
-[rank0]:     entry = self._generate_hlo(
-[rank0]:         inputs,
-[rank0]:     ...<2 lines>...
-[rank0]:         use_complex_decomposition=use_complex_decomposition,
-[rank0]:     )
-[rank0]:   File "/usr/local/lib/python3.14/contextlib.py", line 85, in inner
-[rank0]:     return func(*args, **kwds)
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 875, in _generate_hlo
-[rank0]:     stablehlo_module, io_spec, cast_spec = convert_fx_to_stablehlo(
-[rank0]:                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         gm, inputs, aliasing_info=aliasing_info
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/neuron_dynamo_backend/fx/fx_transform.py", line 241, in convert_fx_to_stablehlo
-[rank0]:     run_pipeline_with_repro_report(
-[rank0]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         raw_module,
-[rank0]:         ^^^^^^^^^^^
-[rank0]:     ...<2 lines>...
-[rank0]:         enable_ir_printing=IR_DEBUG_PRINT,
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 145, in run_pipeline_with_repro_report
-[rank0]:     raise TorchMlirCompilerError(trimmed_message) from e
-[rank0]: torch_mlir.compiler_utils.TorchMlirCompilerError: 
-[rank0]: Failed Torch-MLIR Lowering Torch Backend IR -> StableHLO IR: error: 'stablehlo.concatenate' op inferred type(s) 'tensor<2xi64>' are incompatible with return type(s) of operation 'tensor<1xi64>'
-[rank0]: error: 'stablehlo.concatenate' op failed to infer returned types
-
-
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 106, in run_pipeline_with_repro_report
-[rank1]:     pm.run(module.operation)
-[rank1]:     ~~~~~~^^^^^^^^^^^^^^^^^^
-[rank1]: torch_mlir._mlir_libs._site_initialize.<locals>.MLIRError: Failure while executing pass pipeline
-
-[rank1]: The above exception was the direct cause of the following exception:
-
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/code/run_muse_glimmer.py", line 128, in <module>
-[rank1]:     model.generate(**inputs, **gen_kwargs)
-[rank1]:     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
-[rank1]:     return func(*args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/generation/utils.py", line 2891, in generate
-[rank1]:     model_kwargs = self._maybe_prepare_encoder_kwargs_for_generation(
-[rank1]:         inputs_tensor, model_kwargs, model_input_name, generation_config
-[rank1]:     )
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/generation/utils.py", line 978, in _maybe_prepare_encoder_kwargs_for_generation
-[rank1]:     return self._prepare_multimodal_encoder_kwargs_for_generation(model_kwargs)
-[rank1]:            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/generation/utils.py", line 1048, in _prepare_multimodal_encoder_kwargs_for_generation
-[rank1]:     model_kwargs["mm_encoder_outputs"][modality] = encoder_fn(**encoder_kwargs)
-[rank1]:                                                    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/generic.py", line 943, in wrapper
-[rank1]:     output = func(self, *args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 920, in get_image_features
-[rank1]:     vision_outputs = self.vision_tower(
-[rank1]:         pixel_values=pixel_values,
-[rank1]:         grid_thw=image_grid_thw,
-[rank1]:         **kwargs,
-[rank1]:     )
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank1]:     return self._call_impl(*args, **kwargs)
-[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank1]:     return forward_call(*args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/generic.py", line 1081, in wrapper
-[rank1]:     output = func(self, *args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/output_capturing.py", line 287, in wrapper
-[rank1]:     outputs = func(self, *args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 853, in forward
-[rank1]:     inputs_embeds = self.patch_embedder(pixel_values, grid_thw, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank1]:     return self._call_impl(*args, **kwargs)
-[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank1]:     return forward_call(*args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 696, in forward
-[rank1]:     interp_indices, interp_weights = get_vision_interpolation_indices_and_weights(
-[rank1]:                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         grid_thw,
-[rank1]:         ^^^^^^^^^
-[rank1]:     ...<5 lines>...
-[rank1]:         kwargs=kwargs,
-[rank1]:         ^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/vision_utils.py", line 276, in get_vision_interpolation_indices_and_weights
-[rank1]:     heights = torch.repeat_interleave(grid_thw[:, 1], counts)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank1]:     return fn(*args, **kwargs)
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/operation_registry.py", line 336, in lower
-[rank1]:     lowering_result = kernel.lower(
-[rank1]:         *processed_new_args,
-[rank1]:     ...<8 lines>...
-[rank1]:         **new_kwargs,
-[rank1]:     )
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank1]:     return fn(*args, **kwargs)
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1788, in lower
-[rank1]:     ) = self._get_or_compile_hlo(
-[rank1]:         ~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         processed_inputs,
-[rank1]:         ^^^^^^^^^^^^^^^^^
-[rank1]:     ...<3 lines>...
-[rank1]:         use_complex_decomposition=use_complex_decomposition,
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1411, in _get_or_compile_hlo
-[rank1]:     entry = self._generate_hlo(
-[rank1]:         inputs,
-[rank1]:     ...<2 lines>...
-[rank1]:         use_complex_decomposition=use_complex_decomposition,
-[rank1]:     )
-[rank1]:   File "/usr/local/lib/python3.14/contextlib.py", line 85, in inner
-[rank1]:     return func(*args, **kwds)
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 875, in _generate_hlo
-[rank1]:     stablehlo_module, io_spec, cast_spec = convert_fx_to_stablehlo(
-[rank1]:                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         gm, inputs, aliasing_info=aliasing_info
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/neuron_dynamo_backend/fx/fx_transform.py", line 241, in convert_fx_to_stablehlo
-[rank1]:     run_pipeline_with_repro_report(
-[rank1]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         raw_module,
-[rank1]:         ^^^^^^^^^^^
-[rank1]:     ...<2 lines>...
-[rank1]:         enable_ir_printing=IR_DEBUG_PRINT,
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 145, in run_pipeline_with_repro_report
-[rank1]:     raise TorchMlirCompilerError(trimmed_message) from e
-[rank1]: torch_mlir.compiler_utils.TorchMlirCompilerError: 
-[rank1]: Failed Torch-MLIR Lowering Torch Backend IR -> StableHLO IR: error: 'stablehlo.concatenate' op inferred type(s) 'tensor<2xi64>' are incompatible with return type(s) of operation 'tensor<1xi64>'
-[rank1]: error: 'stablehlo.concatenate' op failed to infer returned types
-
-
-W1021 16:53:07.646000 188 site-packages/torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 256 closing signal SIGTERM
-E1021 16:53:07.678000 188 site-packages/torch/distributed/elastic/multiprocessing/api.py:1002] failed (exitcode: 1) local_rank: 0 (pid: 255) of binary: /usr/local/bin/python3.14
-Traceback (most recent call last):
-  File "/usr/local/bin/torchrun", line 6, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
-    return f(*args, **kwargs)
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/run.py", line 1138, in main
-    run(args)
-    ~~~^^^^^^
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/run.py", line 1129, in run
-    elastic_launch(
-    ~~~~~~~~~~~~~~~
-        config=config,
-        ~~~~~~~~~~~~~~
-        entrypoint=cmd,
-        ~~~~~~~~~~~~~~~
-    )(*cmd_args)
-    ~^^^^^^^^^^^
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
-    return launch_agent(
-        self._config,
-    ...<2 lines>...
-        health_check_server=self._health_check_server,
-    )
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 386, in launch_agent
-    raise ChildFailedError(
-    ...<2 lines>...
-    )
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
-============================================================
-/code/run_muse_glimmer.py FAILED
-------------------------------------------------------------
-Failures:
-[1]:
-  time      : 2026-10-21_16:53:07
-  host      : muse-glimmer-30b-vision-nr8bw
-  rank      : 1 (local_rank: 1)
-  exitcode  : 1 (pid: 256) 
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-------------------------------------------------------------
-Root Cause (first observed failure):
-[0]:
-  time      : 2026-10-21_16:53:07
-  host      : muse-glimmer-30b-vision-nr8bw
-  rank      : 0 (local_rank: 0)
-  exitcode  : 1 (pid: 255) 
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-============================================================
-████ RUNG R3 FAILED ████
-████ RUNG R3 DONE ████
-████ RUNG R4  flags: --compile --vision eager ████
-W1021 16:53:12.423000 4353 site-packages/torch/distributed/run.py:982] 
-W1021 16:53:12.423000 4353 site-packages/torch/distributed/run.py:982] *****************************************
-W1021 16:53:12.423000 4353 site-packages/torch/distributed/run.py:982] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
-W1021 16:53:12.423000 4353 site-packages/torch/distributed/run.py:982] *****************************************
-/workspace/torch_neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
-  _warn_trace_cache_once()
-/workspace/torch_neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
-  _warn_trace_cache_once()
-/usr/local/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py:411: FutureWarning: Passing `tp_plan` directly to `from_pretrained` is deprecated and will be removed in v5.18. Pass it in `distributed_config=DistributedConfig(tp_plan=...)` instead.
-  return model_class.from_pretrained(
-/usr/local/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py:411: FutureWarning: Passing `tp_plan` directly to `from_pretrained` is deprecated and will be removed in v5.18. Pass it in `distributed_config=DistributedConfig(tp_plan=...)` instead.
-  return model_class.from_pretrained(
-Loading weights:   0%|          | 0/1436 [00:00<?, ?it/s]Loading weights:   0%|          | 0/1436 [00:00<?, ?it/s]Loading weights:   1%|          | 10/1436 [00:00<00:14, 95.07it/s]Loading weights:   1%|          | 12/1436 [00:00<00:17, 81.26it/s]Loading weights:   1%|▏         | 20/1436 [00:00<00:17, 81.96it/s]Loading weights:   2%|▏         | 24/1436 [00:00<00:16, 87.32it/s]Loading weights:   2%|▏         | 29/1436 [00:00<00:19, 71.07it/s]Loading weights:   2%|▏         | 33/1436 [00:00<00:17, 79.50it/s]Loading weights:   3%|▎         | 37/1436 [00:00<00:19, 72.22it/s]Loading weights:   3%|▎         | 41/1436 [00:00<00:18, 74.25it/s]Loading weights:   3%|▎         | 48/1436 [00:00<00:17, 78.09it/s]Loading weights:   3%|▎         | 50/1436 [00:00<00:17, 77.82it/s]Loading weights:   4%|▍         | 60/1436 [00:00<00:16, 82.23it/s]Loading weights:   4%|▍         | 56/1436 [00:00<00:19, 72.17it/s]Loading weights:   5%|▍         | 69/1436 [00:00<00:18, 75.85it/s]Loading weights:   4%|▍         | 64/1436 [00:00<00:19, 70.19it/s]Loading weights:   5%|▌         | 77/1436 [00:00<00:18, 75.17it/s]Loading weights:   5%|▌         | 74/1436 [00:01<00:18, 72.28it/s]Loading weights:   6%|▌         | 84/1436 [00:01<00:17, 78.42it/s]Loading weights:   6%|▌         | 86/1436 [00:01<00:18, 71.47it/s]Loading weights:   7%|▋         | 94/1436 [00:01<00:17, 78.72it/s]Loading weights:   7%|▋         | 100/1436 [00:01<00:17, 75.12it/s]Loading weights:   7%|▋         | 102/1436 [00:01<00:18, 72.35it/s]Loading weights:   8%|▊         | 109/1436 [00:01<00:17, 76.35it/s]Loading weights:   8%|▊         | 112/1436 [00:01<00:17, 74.86it/s]Loading weights:   8%|▊         | 120/1436 [00:01<00:16, 77.95it/s]Loading weights:   8%|▊         | 122/1436 [00:01<00:17, 75.78it/s]Loading weights:   9%|▉         | 130/1436 [00:01<00:16, 80.07it/s]Loading weights:   9%|▉         | 132/1436 [00:01<00:16, 81.23it/s]Loading weights:  10%|▉         | 139/1436 [00:01<00:17, 73.83it/s]Loading weights:  10%|▉         | 142/1436 [00:01<00:16, 80.19it/s]Loading weights:  10%|█         | 148/1436 [00:01<00:17, 74.96it/s]Loading weights:  11%|█         | 151/1436 [00:01<00:17, 75.48it/s]Loading weights:  11%|█         | 158/1436 [00:02<00:17, 74.52it/s]Loading weights:  11%|█         | 160/1436 [00:02<00:17, 73.49it/s]Loading weights:  12%|█▏        | 168/1436 [00:02<00:16, 78.84it/s]Loading weights:  12%|█▏        | 170/1436 [00:02<00:16, 74.99it/s]Loading weights:  12%|█▏        | 178/1436 [00:02<00:15, 80.88it/s]Loading weights:  13%|█▎        | 180/1436 [00:02<00:15, 80.49it/s]Loading weights:  13%|█▎        | 187/1436 [00:02<00:16, 74.42it/s]Loading weights:  13%|█▎        | 190/1436 [00:02<00:15, 79.92it/s]Loading weights:  14%|█▎        | 196/1436 [00:02<00:16, 76.06it/s]Loading weights:  14%|█▍        | 199/1436 [00:02<00:16, 75.45it/s]Loading weights:  14%|█▍        | 206/1436 [00:02<00:16, 74.82it/s]Loading weights:  14%|█▍        | 208/1436 [00:02<00:16, 74.72it/s]Loading weights:  15%|█▌        | 220/1436 [00:02<00:15, 78.28it/s]Loading weights:  15%|█▌        | 218/1436 [00:02<00:16, 75.24it/s]Loading weights:  16%|█▌        | 229/1436 [00:02<00:15, 77.49it/s]Loading weights:  16%|█▌        | 228/1436 [00:02<00:15, 78.45it/s]Loading weights:  17%|█▋        | 240/1436 [00:03<00:15, 78.24it/s]Loading weights:  17%|█▋        | 238/1436 [00:03<00:14, 80.53it/s]Loading weights:  17%|█▋        | 250/1436 [00:03<00:14, 80.70it/s]Loading weights:  17%|█▋        | 247/1436 [00:03<00:15, 75.81it/s]Loading weights:  18%|█▊        | 259/1436 [00:03<00:15, 73.62it/s]Loading weights:  18%|█▊        | 256/1436 [00:03<00:16, 73.73it/s]Loading weights:  19%|█▊        | 268/1436 [00:03<00:15, 73.93it/s]Loading weights:  19%|█▊        | 268/1436 [00:03<00:15, 75.94it/s]Loading weights:  19%|█▉        | 278/1436 [00:03<00:15, 75.01it/s]Loading weights:  19%|█▉        | 280/1436 [00:03<00:15, 75.99it/s]Loading weights:  20%|██        | 288/1436 [00:03<00:14, 77.46it/s]Loading weights:  20%|██        | 290/1436 [00:03<00:15, 75.93it/s]Loading weights:  21%|██        | 298/1436 [00:03<00:13, 81.49it/s]Loading weights:  21%|██        | 300/1436 [00:03<00:13, 81.32it/s]Loading weights:  21%|██▏       | 307/1436 [00:04<00:15, 74.51it/s]Loading weights:  22%|██▏       | 310/1436 [00:04<00:14, 80.05it/s]Loading weights:  22%|██▏       | 316/1436 [00:04<00:14, 77.81it/s]Loading weights:  22%|██▏       | 319/1436 [00:04<00:14, 75.84it/s]Loading weights:  23%|██▎       | 325/1436 [00:04<00:14, 77.36it/s]Loading weights:  23%|██▎       | 328/1436 [00:04<00:14, 75.05it/s]Loading weights:  23%|██▎       | 336/1436 [00:04<00:14, 78.56it/s]Loading weights:  24%|██▎       | 338/1436 [00:04<00:14, 75.24it/s]Loading weights:  24%|██▍       | 346/1436 [00:04<00:13, 80.80it/s]Loading weights:  24%|██▍       | 348/1436 [00:04<00:13, 80.94it/s]Loading weights:  25%|██▍       | 355/1436 [00:04<00:14, 74.04it/s]Loading weights:  25%|██▍       | 358/1436 [00:04<00:13, 79.22it/s]Loading weights:  25%|██▌       | 364/1436 [00:04<00:14, 75.81it/s]Loading weights:  26%|██▌       | 367/1436 [00:04<00:14, 74.87it/s]Loading weights:  26%|██▌       | 374/1436 [00:04<00:14, 74.55it/s]Loading weights:  26%|██▌       | 376/1436 [00:04<00:14, 74.51it/s]Loading weights:  27%|██▋       | 384/1436 [00:04<00:13, 77.09it/s]Loading weights:  27%|██▋       | 386/1436 [00:05<00:14, 73.68it/s]Loading weights:  28%|██▊       | 396/1436 [00:05<00:12, 83.69it/s]Loading weights:  28%|██▊       | 396/1436 [00:05<00:13, 76.23it/s]Loading weights:  28%|██▊       | 405/1436 [00:05<00:13, 77.90it/s]Loading weights:  28%|██▊       | 406/1436 [00:05<00:12, 79.58it/s]Loading weights:  29%|██▉       | 413/1436 [00:05<00:13, 77.15it/s]Loading weights:  29%|██▉       | 415/1436 [00:05<00:13, 74.49it/s]Loading weights:  29%|██▉       | 422/1436 [00:05<00:13, 72.91it/s]Loading weights:  30%|██▉       | 424/1436 [00:05<00:13, 75.18it/s]Loading weights:  30%|███       | 432/1436 [00:05<00:13, 76.95it/s]Loading weights:  30%|███       | 434/1436 [00:05<00:13, 75.45it/s]Loading weights:  31%|███       | 442/1436 [00:05<00:12, 79.60it/s]Loading weights:  31%|███       | 444/1436 [00:05<00:12, 81.00it/s]Loading weights:  31%|███▏      | 451/1436 [00:05<00:13, 73.10it/s]Loading weights:  32%|███▏      | 454/1436 [00:05<00:12, 80.12it/s]Loading weights:  32%|███▏      | 460/1436 [00:05<00:13, 74.98it/s]Loading weights:  32%|███▏      | 463/1436 [00:06<00:12, 75.57it/s]Loading weights:  33%|███▎      | 470/1436 [00:06<00:13, 73.94it/s]Loading weights:  33%|███▎      | 472/1436 [00:06<00:12, 74.73it/s]Loading weights:  33%|███▎      | 480/1436 [00:06<00:12, 76.25it/s]Loading weights:  34%|███▎      | 482/1436 [00:06<00:12, 75.20it/s]Loading weights:  34%|███▍      | 490/1436 [00:06<00:11, 80.53it/s]Loading weights:  34%|███▍      | 492/1436 [00:06<00:11, 80.41it/s]Loading weights:  35%|███▍      | 499/1436 [00:06<00:12, 74.00it/s]Loading weights:  35%|███▍      | 502/1436 [00:06<00:11, 79.63it/s]Loading weights:  35%|███▌      | 508/1436 [00:06<00:12, 75.52it/s]Loading weights:  36%|███▌      | 511/1436 [00:06<00:12, 74.97it/s]Loading weights:  36%|███▌      | 518/1436 [00:06<00:12, 74.29it/s]Loading weights:  36%|███▌      | 520/1436 [00:06<00:12, 73.98it/s]Loading weights:  37%|███▋      | 532/1436 [00:06<00:11, 77.49it/s]Loading weights:  37%|███▋      | 530/1436 [00:06<00:12, 74.64it/s]Loading weights:  38%|███▊      | 541/1436 [00:07<00:11, 77.31it/s]Loading weights:  38%|███▊      | 540/1436 [00:07<00:11, 80.09it/s]Loading weights:  38%|███▊      | 552/1436 [00:07<00:11, 78.97it/s]Loading weights:  38%|███▊      | 550/1436 [00:07<00:11, 79.27it/s]Loading weights:  39%|███▉      | 562/1436 [00:07<00:10, 80.29it/s]Loading weights:  39%|███▉      | 559/1436 [00:07<00:11, 74.80it/s]Loading weights:  40%|███▉      | 571/1436 [00:07<00:11, 73.87it/s]Loading weights:  40%|███▉      | 568/1436 [00:07<00:11, 74.18it/s]Loading weights:  40%|████      | 580/1436 [00:07<00:11, 75.89it/s]Loading weights:  40%|████      | 578/1436 [00:07<00:11, 74.51it/s]Loading weights:  41%|████      | 588/1436 [00:07<00:10, 80.10it/s]Loading weights:  41%|████      | 590/1436 [00:07<00:11, 74.39it/s]Loading weights:  42%|████▏     | 600/1436 [00:07<00:10, 78.54it/s]Loading weights:  42%|████▏     | 598/1436 [00:07<00:10, 79.69it/s]Loading weights:  42%|████▏     | 610/1436 [00:07<00:10, 80.82it/s]Loading weights:  42%|████▏     | 607/1436 [00:07<00:11, 74.98it/s]Loading weights:  43%|████▎     | 616/1436 [00:08<00:11, 74.35it/s]Loading weights:  43%|████▎     | 619/1436 [00:08<00:11, 73.55it/s]Loading weights:  44%|████▍     | 634/1436 [00:08<00:08, 92.16it/s]Loading weights:  44%|████▍     | 629/1436 [00:08<00:09, 86.72it/s]Loading weights:  48%|████▊     | 686/1436 [00:08<00:03, 202.56it/s]Loading weights:  46%|████▌     | 658/1436 [00:08<00:05, 139.33it/s]Loading weights:  52%|█████▏    | 746/1436 [00:08<00:02, 307.44it/s]Loading weights:  50%|█████     | 722/1436 [00:08<00:02, 275.03it/s]Loading weights:  56%|█████▌    | 802/1436 [00:08<00:01, 375.96it/s]Loading weights:  54%|█████▍    | 780/1436 [00:08<00:01, 357.69it/s]Loading weights:  60%|██████    | 864/1436 [00:08<00:01, 435.53it/s]Loading weights:  59%|█████▉    | 844/1436 [00:08<00:01, 425.73it/s]Loading weights:  63%|██████▎   | 898/1436 [00:08<00:01, 456.99it/s]Loading weights:  65%|██████▍   | 927/1436 [00:08<00:01, 476.12it/s]Loading weights:  69%|██████▊   | 986/1436 [00:08<00:00, 504.31it/s]Loading weights:  67%|██████▋   | 964/1436 [00:08<00:00, 504.86it/s]Loading weights:  73%|███████▎  | 1042/1436 [00:08<00:00, 520.14it/s]Loading weights:  71%|███████▏  | 1026/1436 [00:08<00:00, 531.38it/s]Loading weights:  77%|███████▋  | 1102/1436 [00:08<00:00, 539.44it/s]Loading weights:  76%|███████▌  | 1085/1436 [00:08<00:00, 541.72it/s]Loading weights:  81%|████████  | 1163/1436 [00:09<00:00, 548.05it/s]Loading weights:  80%|████████  | 1150/1436 [00:09<00:00, 556.39it/s]Loading weights:  86%|████████▌ | 1230/1436 [00:09<00:00, 563.06it/s]Loading weights:  84%|████████▍ | 1206/1436 [00:09<00:00, 549.13it/s]Loading weights:  88%|████████▊ | 1266/1436 [00:09<00:00, 559.13it/s]Loading weights:  90%|█████████ | 1296/1436 [00:09<00:00, 574.65it/s]Loading weights:  92%|█████████▏| 1325/1436 [00:09<00:00, 560.84it/s]Loading weights:  94%|█████████▍| 1354/1436 [00:09<00:00, 568.82it/s]Loading weights:  97%|█████████▋| 1387/1436 [00:09<00:00, 566.43it/s]Loading weights:  98%|█████████▊| 1411/1436 [00:09<00:00, 560.25it/s]Loading weights: 100%|██████████| 1436/1436 [00:09<00:00, 150.05it/s]
-Loading weights: 100%|██████████| 1436/1436 [00:09<00:00, 149.76it/s]
-RUN CONFIG: mode=compile text, vision eager image=https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg prompt_tokens=289 image_grid_thw=[[1, 32, 32]]
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 106, in run_pipeline_with_repro_report
-[rank1]:     pm.run(module.operation)
-[rank1]:     ~~~~~~^^^^^^^^^^^^^^^^^^
-[rank1]: torch_mlir._mlir_libs._site_initialize.<locals>.MLIRError: Failure while executing pass pipeline
-
-[rank1]: The above exception was the direct cause of the following exception:
-
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/code/run_muse_glimmer.py", line 109, in <module>
-[rank1]:     mc.greedy_generate(step, ids, cache, args.max_new_tokens, sync=torch.neuron.synchronize, prefill=prefill)
-[rank1]:     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/code/..2026_10_21_16_50_46.772459564/muse_compile.py", line 170, in greedy_generate
-[rank1]:     logits = prefill(cache, pos) if prefill is not None else step(input_ids, cache, pos)
-[rank1]:              ~~~~~~~^^^^^^^^^^^^
-[rank1]:   File "/code/run_muse_glimmer.py", line 103, in prefill
-[rank1]:     feats = vision()
-[rank1]:   File "/code/..2026_10_21_16_50_46.772459564/muse_compile.py", line 144, in <lambda>
-[rank1]:     return lambda: image_embeds(model, pixel_values, grid_thw)
-[rank1]:                    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/code/..2026_10_21_16_50_46.772459564/muse_compile.py", line 186, in image_embeds
-[rank1]:     feats = m.vision_tower(pixel_values=pixel_values, grid_thw=grid_thw, **vision_kwargs).last_hidden_state
-[rank1]:             ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank1]:     return self._call_impl(*args, **kwargs)
-[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank1]:     return forward_call(*args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/generic.py", line 1081, in wrapper
-[rank1]:     output = func(self, *args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/output_capturing.py", line 287, in wrapper
-[rank1]:     outputs = func(self, *args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 853, in forward
-[rank1]:     inputs_embeds = self.patch_embedder(pixel_values, grid_thw, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank1]:     return self._call_impl(*args, **kwargs)
-[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank1]:     return forward_call(*args, **kwargs)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 696, in forward
-[rank1]:     interp_indices, interp_weights = get_vision_interpolation_indices_and_weights(
-[rank1]:                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         grid_thw,
-[rank1]:         ^^^^^^^^^
-[rank1]:     ...<5 lines>...
-[rank1]:         kwargs=kwargs,
-[rank1]:         ^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/transformers/vision_utils.py", line 276, in get_vision_interpolation_indices_and_weights
-[rank1]:     heights = torch.repeat_interleave(grid_thw[:, 1], counts)
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank1]:     return fn(*args, **kwargs)
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/operation_registry.py", line 336, in lower
-[rank1]:     lowering_result = kernel.lower(
-[rank1]:         *processed_new_args,
-[rank1]:     ...<8 lines>...
-[rank1]:         **new_kwargs,
-[rank1]:     )
-[rank1]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank1]:     return fn(*args, **kwargs)
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1788, in lower
-[rank1]:     ) = self._get_or_compile_hlo(
-[rank1]:         ~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         processed_inputs,
-[rank1]:         ^^^^^^^^^^^^^^^^^
-[rank1]:     ...<3 lines>...
-[rank1]:         use_complex_decomposition=use_complex_decomposition,
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1411, in _get_or_compile_hlo
-[rank1]:     entry = self._generate_hlo(
-[rank1]:         inputs,
-[rank1]:     ...<2 lines>...
-[rank1]:         use_complex_decomposition=use_complex_decomposition,
-[rank1]:     )
-[rank1]:   File "/usr/local/lib/python3.14/contextlib.py", line 85, in inner
-[rank1]:     return func(*args, **kwds)
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 875, in _generate_hlo
-[rank1]:     stablehlo_module, io_spec, cast_spec = convert_fx_to_stablehlo(
-[rank1]:                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         gm, inputs, aliasing_info=aliasing_info
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/workspace/torch_neuronx/torch_neuronx/neuron_dynamo_backend/fx/fx_transform.py", line 241, in convert_fx_to_stablehlo
-[rank1]:     run_pipeline_with_repro_report(
-[rank1]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         raw_module,
-[rank1]:         ^^^^^^^^^^^
-[rank1]:     ...<2 lines>...
-[rank1]:         enable_ir_printing=IR_DEBUG_PRINT,
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 145, in run_pipeline_with_repro_report
-[rank1]:     raise TorchMlirCompilerError(trimmed_message) from e
-[rank1]: torch_mlir.compiler_utils.TorchMlirCompilerError: 
-[rank1]: Failed Torch-MLIR Lowering Torch Backend IR -> StableHLO IR: error: 'stablehlo.concatenate' op inferred type(s) 'tensor<2xi64>' are incompatible with return type(s) of operation 'tensor<1xi64>'
-[rank1]: error: 'stablehlo.concatenate' op failed to infer returned types
-
-
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 106, in run_pipeline_with_repro_report
-[rank0]:     pm.run(module.operation)
-[rank0]:     ~~~~~~^^^^^^^^^^^^^^^^^^
-[rank0]: torch_mlir._mlir_libs._site_initialize.<locals>.MLIRError: Failure while executing pass pipeline
-
-[rank0]: The above exception was the direct cause of the following exception:
-
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/code/run_muse_glimmer.py", line 109, in <module>
-[rank0]:     mc.greedy_generate(step, ids, cache, args.max_new_tokens, sync=torch.neuron.synchronize, prefill=prefill)
-[rank0]:     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/code/..2026_10_21_16_50_46.772459564/muse_compile.py", line 170, in greedy_generate
-[rank0]:     logits = prefill(cache, pos) if prefill is not None else step(input_ids, cache, pos)
-[rank0]:              ~~~~~~~^^^^^^^^^^^^
-[rank0]:   File "/code/run_muse_glimmer.py", line 103, in prefill
-[rank0]:     feats = vision()
-[rank0]:   File "/code/..2026_10_21_16_50_46.772459564/muse_compile.py", line 144, in <lambda>
-[rank0]:     return lambda: image_embeds(model, pixel_values, grid_thw)
-[rank0]:                    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/code/..2026_10_21_16_50_46.772459564/muse_compile.py", line 186, in image_embeds
-[rank0]:     feats = m.vision_tower(pixel_values=pixel_values, grid_thw=grid_thw, **vision_kwargs).last_hidden_state
-[rank0]:             ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank0]:     return self._call_impl(*args, **kwargs)
-[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank0]:     return forward_call(*args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/generic.py", line 1081, in wrapper
-[rank0]:     output = func(self, *args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/utils/output_capturing.py", line 287, in wrapper
-[rank0]:     outputs = func(self, *args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 853, in forward
-[rank0]:     inputs_embeds = self.patch_embedder(pixel_values, grid_thw, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1783, in _wrapped_call_impl
-[rank0]:     return self._call_impl(*args, **kwargs)
-[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1794, in _call_impl
-[rank0]:     return forward_call(*args, **kwargs)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/models/muse_glimmer/modeling_muse_glimmer.py", line 696, in forward
-[rank0]:     interp_indices, interp_weights = get_vision_interpolation_indices_and_weights(
-[rank0]:                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         grid_thw,
-[rank0]:         ^^^^^^^^^
-[rank0]:     ...<5 lines>...
-[rank0]:         kwargs=kwargs,
-[rank0]:         ^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/transformers/vision_utils.py", line 276, in get_vision_interpolation_indices_and_weights
-[rank0]:     heights = torch.repeat_interleave(grid_thw[:, 1], counts)
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank0]:     return fn(*args, **kwargs)
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/operation_registry.py", line 336, in lower
-[rank0]:     lowering_result = kernel.lower(
-[rank0]:         *processed_new_args,
-[rank0]:     ...<8 lines>...
-[rank0]:         **new_kwargs,
-[rank0]:     )
-[rank0]:   File "/usr/local/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
-[rank0]:     return fn(*args, **kwargs)
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1788, in lower
-[rank0]:     ) = self._get_or_compile_hlo(
-[rank0]:         ~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         processed_inputs,
-[rank0]:         ^^^^^^^^^^^^^^^^^
-[rank0]:     ...<3 lines>...
-[rank0]:         use_complex_decomposition=use_complex_decomposition,
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 1411, in _get_or_compile_hlo
-[rank0]:     entry = self._generate_hlo(
-[rank0]:         inputs,
-[rank0]:     ...<2 lines>...
-[rank0]:         use_complex_decomposition=use_complex_decomposition,
-[rank0]:     )
-[rank0]:   File "/usr/local/lib/python3.14/contextlib.py", line 85, in inner
-[rank0]:     return func(*args, **kwds)
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/python_ops/torch_mlir/kernel.py", line 875, in _generate_hlo
-[rank0]:     stablehlo_module, io_spec, cast_spec = convert_fx_to_stablehlo(
-[rank0]:                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         gm, inputs, aliasing_info=aliasing_info
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/workspace/torch_neuronx/torch_neuronx/neuron_dynamo_backend/fx/fx_transform.py", line 241, in convert_fx_to_stablehlo
-[rank0]:     run_pipeline_with_repro_report(
-[rank0]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         raw_module,
-[rank0]:         ^^^^^^^^^^^
-[rank0]:     ...<2 lines>...
-[rank0]:         enable_ir_printing=IR_DEBUG_PRINT,
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/workspace/torch_neuronx/third_party/torch-mlir/python/torch_mlir/compiler_utils.py", line 145, in run_pipeline_with_repro_report
-[rank0]:     raise TorchMlirCompilerError(trimmed_message) from e
-[rank0]: torch_mlir.compiler_utils.TorchMlirCompilerError: 
-[rank0]: Failed Torch-MLIR Lowering Torch Backend IR -> StableHLO IR: error: 'stablehlo.concatenate' op inferred type(s) 'tensor<2xi64>' are incompatible with return type(s) of operation 'tensor<1xi64>'
-[rank0]: error: 'stablehlo.concatenate' op failed to infer returned types
-
-
-W1021 16:54:21.916000 4353 site-packages/torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 4420 closing signal SIGTERM
-E1021 16:54:21.980000 4353 site-packages/torch/distributed/elastic/multiprocessing/api.py:1002] failed (exitcode: 1) local_rank: 1 (pid: 4421) of binary: /usr/local/bin/python3.14
-Traceback (most recent call last):
-  File "/usr/local/bin/torchrun", line 6, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
-    return f(*args, **kwargs)
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/run.py", line 1138, in main
-    run(args)
-    ~~~^^^^^^
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/run.py", line 1129, in run
-    elastic_launch(
-    ~~~~~~~~~~~~~~~
-        config=config,
-        ~~~~~~~~~~~~~~
-        entrypoint=cmd,
-        ~~~~~~~~~~~~~~~
-    )(*cmd_args)
-    ~^^^^^^^^^^^
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
-    return launch_agent(
-        self._config,
-    ...<2 lines>...
-        health_check_server=self._health_check_server,
-    )
-  File "/usr/local/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 386, in launch_agent
-    raise ChildFailedError(
-    ...<2 lines>...
-    )
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
-============================================================
-/code/run_muse_glimmer.py FAILED
-------------------------------------------------------------
-Failures:
-[1]:
-  time      : 2026-10-21_16:54:21
-  host      : muse-glimmer-30b-vision-nr8bw
-  rank      : 0 (local_rank: 0)
-  exitcode  : 1 (pid: 4420) 
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-------------------------------------------------------------
-Root Cause (first observed failure):
-[0]:
-  time      : 2026-10-21_16:54:21
-  host      : muse-glimmer-30b-vision-nr8bw
-  rank      : 1 (local_rank: 1)
-  exitcode  : 1 (pid: 4421) 
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-============================================================
-████ RUNG R4 FAILED ████
-████ RUNG R4 DONE ████
-████ RUNG R5  flags: --compile --vision compile ████
-W1021 16:54:26.399000 5477 site-packages/torch/distributed/run.py:982] 
-W1021 16:54:26.399000 5477 site-packages/torch/distributed/run.py:982] *****************************************
-W1021 16:54:26.399000 5477 site-packages/torch/distributed/run.py:982] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
-W1021 16:54:26.399000 5477 site-packages/torch/distributed/run.py:982] *****************************************
-/workspace/torch_neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
-  _warn_trace_cache_once()
-/workspace/torch_neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
-  _warn_trace_cache_once()
-/usr/local/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py:411: FutureWarning: Passing `tp_plan` directly to `from_pretrained` is deprecated and will be removed in v5.18. Pass it in `distributed_config=DistributedConfig(tp_plan=...)` instead.
-  return model_class.from_pretrained(
-/usr/local/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py:411: FutureWarning: Passing `tp_plan` directly to `from_pretrained` is deprecated and will be removed in v5.18. Pass it in `distributed_config=DistributedConfig(tp_plan=...)` instead.
-  return model_class.from_pretrained(
-Loading weights:   0%|          | 0/1436 [00:00<?, ?it/s]Loading weights:   0%|          | 0/1436 [00:00<?, ?it/s]Loading weights:   0%|          | 4/1436 [00:00<00:38, 37.11it/s]Loading weights:   0%|          | 5/1436 [00:00<00:44, 32.16it/s]Loading weights:   1%|          | 12/1436 [00:00<00:26, 54.11it/s]Loading weights:   1%|          | 16/1436 [00:00<00:25, 55.54it/s]Loading weights:   2%|▏         | 25/1436 [00:00<00:21, 65.21it/s]Loading weights:   2%|▏         | 27/1436 [00:00<00:20, 70.36it/s]Loading weights:   3%|▎         | 36/1436 [00:00<00:19, 73.24it/s]Loading weights:   3%|▎         | 36/1436 [00:00<00:20, 67.34it/s]Loading weights:   3%|▎         | 46/1436 [00:00<00:17, 79.98it/s]Loading weights:   3%|▎         | 46/1436 [00:00<00:18, 75.52it/s]Loading weights:   4%|▍         | 55/1436 [00:00<00:19, 70.91it/s]Loading weights:   4%|▍         | 54/1436 [00:00<00:21, 65.59it/s]Loading weights:   4%|▍         | 64/1436 [00:00<00:18, 72.94it/s]Loading weights:   4%|▍         | 64/1436 [00:00<00:18, 72.71it/s]Loading weights:   5%|▌         | 74/1436 [00:01<00:17, 77.43it/s]Loading weights:   5%|▌         | 73/1436 [00:01<00:17, 76.41it/s]Loading weights:   6%|▌         | 84/1436 [00:01<00:16, 79.66it/s]Loading weights:   6%|▌         | 84/1436 [00:01<00:17, 76.77it/s]Loading weights:   7%|▋         | 94/1436 [00:01<00:16, 81.00it/s]Loading weights:   7%|▋         | 94/1436 [00:01<00:16, 81.51it/s]Loading weights:   7%|▋         | 103/1436 [00:01<00:17, 74.49it/s]Loading weights:   7%|▋         | 103/1436 [00:01<00:18, 72.94it/s]Loading weights:   8%|▊         | 112/1436 [00:01<00:17, 75.49it/s]Loading weights:   8%|▊         | 112/1436 [00:01<00:17, 74.42it/s]Loading weights:   9%|▊         | 124/1436 [00:01<00:16, 78.25it/s]Loading weights:   8%|▊         | 122/1436 [00:01<00:17, 75.60it/s]Loading weights:   9%|▉         | 132/1436 [00:01<00:16, 78.54it/s]Loading weights:   9%|▉         | 136/1436 [00:01<00:17, 75.92it/s]Loading weights:  10%|▉         | 142/1436 [00:01<00:15, 83.21it/s]Loading weights:  10%|█         | 146/1436 [00:01<00:16, 78.60it/s]Loading weights:  11%|█         | 151/1436 [00:02<00:17, 73.50it/s]Loading weights:  11%|█         | 156/1436 [00:02<00:16, 79.99it/s]Loading weights:  11%|█         | 160/1436 [00:02<00:17, 74.76it/s]Loading weights:  12%|█▏        | 166/1436 [00:02<00:15, 81.31it/s]Loading weights:  12%|█▏        | 170/1436 [00:02<00:16, 76.01it/s]Loading weights:  12%|█▏        | 175/1436 [00:02<00:16, 74.85it/s]Loading weights:  13%|█▎        | 180/1436 [00:02<00:15, 79.12it/s]Loading weights:  13%|█▎        | 184/1436 [00:02<00:16, 74.49it/s]Loading weights:  13%|█▎        | 190/1436 [00:02<00:15, 83.06it/s]Loading weights:  14%|█▎        | 194/1436 [00:02<00:15, 78.06it/s]Loading weights:  14%|█▍        | 199/1436 [00:02<00:16, 73.88it/s]Loading weights:  14%|█▍        | 204/1436 [00:02<00:15, 80.19it/s]Loading weights:  14%|█▍        | 208/1436 [00:02<00:16, 75.36it/s]Loading weights:  15%|█▍        | 214/1436 [00:02<00:14, 81.75it/s]Loading weights:  15%|█▌        | 218/1436 [00:02<00:15, 76.81it/s]Loading weights:  16%|█▌        | 223/1436 [00:02<00:16, 75.07it/s]Loading weights:  16%|█▌        | 228/1436 [00:03<00:15, 79.40it/s]Loading weights:  16%|█▌        | 232/1436 [00:03<00:16, 74.90it/s]Loading weights:  17%|█▋        | 238/1436 [00:03<00:14, 83.85it/s]Loading weights:  17%|█▋        | 242/1436 [00:03<00:15, 77.91it/s]Loading weights:  17%|█▋        | 247/1436 [00:03<00:16, 74.24it/s]Loading weights:  18%|█▊        | 252/1436 [00:03<00:14, 79.97it/s]Loading weights:  18%|█▊        | 256/1436 [00:03<00:15, 75.37it/s]Loading weights:  18%|█▊        | 262/1436 [00:03<00:14, 81.82it/s]Loading weights:  19%|█▊        | 266/1436 [00:03<00:15, 77.32it/s]Loading weights:  19%|█▉        | 280/1436 [00:03<00:13, 82.70it/s]Loading weights:  20%|██        | 290/1436 [00:03<00:13, 85.82it/s]Loading weights:  21%|██        | 300/1436 [00:03<00:12, 89.33it/s]Loading weights:  22%|██▏       | 312/1436 [00:04<00:11, 93.72it/s]Loading weights:  22%|██▏       | 322/1436 [00:04<00:11, 93.32it/s]Loading weights:  23%|██▎       | 332/1436 [00:04<00:11, 94.46it/s]Loading weights:  24%|██▍       | 342/1436 [00:04<00:13, 81.82it/s]Loading weights:  19%|█▉        | 271/1436 [00:04<00:46, 24.87it/s]Loading weights:  25%|██▍       | 352/1436 [00:04<00:13, 82.50it/s]Loading weights:  19%|█▉        | 280/1436 [00:04<00:37, 30.86it/s]Loading weights:  25%|██▌       | 362/1436 [00:04<00:12, 83.16it/s]Loading weights:  20%|██        | 290/1436 [00:04<00:29, 38.28it/s]Loading weights:  26%|██▌       | 372/1436 [00:04<00:12, 84.90it/s]Loading weights:  21%|██        | 300/1436 [00:04<00:24, 46.24it/s]Loading weights:  27%|██▋       | 382/1436 [00:04<00:12, 85.18it/s]Loading weights:  22%|██▏       | 310/1436 [00:04<00:20, 54.52it/s]Loading weights:  27%|██▋       | 391/1436 [00:04<00:13, 79.10it/s]Loading weights:  22%|██▏       | 318/1436 [00:05<00:20, 54.08it/s]Loading weights:  28%|██▊       | 400/1436 [00:05<00:13, 76.92it/s]Loading weights:  23%|██▎       | 328/1436 [00:05<00:18, 61.02it/s]Loading weights:  29%|██▊       | 410/1436 [00:05<00:12, 79.46it/s]Loading weights:  24%|██▎       | 338/1436 [00:05<00:16, 66.70it/s]Loading weights:  29%|██▉       | 420/1436 [00:05<00:12, 80.79it/s]Loading weights:  24%|██▍       | 348/1436 [00:05<00:15, 71.79it/s]Loading weights:  30%|██▉       | 430/1436 [00:05<00:12, 82.02it/s]Loading weights:  25%|██▍       | 358/1436 [00:05<00:13, 77.63it/s]Loading weights:  31%|███       | 439/1436 [00:05<00:13, 75.29it/s]Loading weights:  26%|██▌       | 367/1436 [00:05<00:15, 70.85it/s]Loading weights:  31%|███       | 448/1436 [00:05<00:12, 76.26it/s]Loading weights:  26%|██▌       | 376/1436 [00:05<00:14, 74.36it/s]Loading weights:  32%|███▏      | 460/1436 [00:05<00:12, 78.44it/s]Loading weights:  27%|██▋       | 385/1436 [00:05<00:13, 75.10it/s]Loading weights:  28%|██▊       | 396/1436 [00:05<00:13, 79.05it/s]Loading weights:  33%|███▎      | 472/1436 [00:06<00:12, 75.52it/s]Loading weights:  28%|██▊       | 406/1436 [00:06<00:12, 83.34it/s]Loading weights:  34%|███▎      | 482/1436 [00:06<00:12, 78.29it/s]Loading weights:  29%|██▉       | 415/1436 [00:06<00:13, 73.95it/s]Loading weights:  34%|███▍      | 492/1436 [00:06<00:11, 80.53it/s]Loading weights:  30%|██▉       | 424/1436 [00:06<00:13, 76.21it/s]Loading weights:  35%|███▍      | 502/1436 [00:06<00:11, 81.71it/s]Loading weights:  30%|███       | 433/1436 [00:06<00:12, 79.00it/s]Loading weights:  36%|███▌      | 511/1436 [00:06<00:12, 75.29it/s]Loading weights:  31%|███       | 444/1436 [00:06<00:12, 78.50it/s]Loading weights:  36%|███▌      | 520/1436 [00:06<00:12, 75.29it/s]Loading weights:  32%|███▏      | 454/1436 [00:06<00:11, 82.61it/s]Loading weights:  37%|███▋      | 530/1436 [00:06<00:11, 77.66it/s]Loading weights:  32%|███▏      | 463/1436 [00:06<00:13, 73.34it/s]Loading weights:  38%|███▊      | 540/1436 [00:06<00:11, 79.87it/s]Loading weights:  33%|███▎      | 472/1436 [00:07<00:13, 73.69it/s]Loading weights:  38%|███▊      | 550/1436 [00:07<00:10, 80.80it/s]Loading weights:  34%|███▎      | 482/1436 [00:07<00:12, 76.75it/s]Loading weights:  39%|███▉      | 559/1436 [00:07<00:11, 74.66it/s]Loading weights:  34%|███▍      | 492/1436 [00:07<00:11, 81.60it/s]Loading weights:  40%|███▉      | 568/1436 [00:07<00:11, 75.58it/s]Loading weights:  35%|███▍      | 501/1436 [00:07<00:11, 80.80it/s]Loading weights:  40%|████      | 580/1436 [00:07<00:10, 78.00it/s]Loading weights:  36%|███▌      | 510/1436 [00:07<00:11, 79.13it/s]Loading weights:  41%|████      | 592/1436 [00:07<00:11, 75.42it/s]Loading weights:  36%|███▌      | 520/1436 [00:07<00:12, 72.97it/s]Loading weights:  42%|████▏     | 602/1436 [00:07<00:10, 78.16it/s]Loading weights:  37%|███▋      | 530/1436 [00:07<00:12, 75.19it/s]Loading weights:  43%|████▎     | 612/1436 [00:07<00:10, 79.79it/s]Loading weights:  38%|███▊      | 540/1436 [00:07<00:11, 78.14it/s]Loading weights:  43%|████▎     | 622/1436 [00:07<00:09, 81.44it/s]Loading weights:  38%|███▊      | 550/1436 [00:07<00:10, 82.38it/s]Loading weights:  44%|████▍     | 638/1436 [00:08<00:08, 96.03it/s]Loading weights:  39%|███▉      | 559/1436 [00:08<00:11, 77.95it/s]Loading weights:  48%|████▊     | 690/1436 [00:08<00:03, 202.70it/s]Loading weights:  40%|███▉      | 568/1436 [00:08<00:10, 78.97it/s]Loading weights:  51%|█████▏    | 738/1436 [00:08<00:02, 275.68it/s]Loading weights:  40%|████      | 578/1436 [00:08<00:10, 81.90it/s]Loading weights:  56%|█████▌    | 798/1436 [00:08<00:01, 361.57it/s]Loading weights:  59%|█████▉    | 851/1436 [00:08<00:01, 396.90it/s]Loading weights:  41%|████      | 592/1436 [00:08<00:10, 83.72it/s]Loading weights:  64%|██████▎   | 914/1436 [00:08<00:01, 438.52it/s]Loading weights:  42%|████▏     | 604/1436 [00:08<00:09, 84.02it/s]Loading weights:  68%|██████▊   | 970/1436 [00:08<00:00, 467.59it/s]Loading weights:  43%|████▎     | 616/1436 [00:08<00:09, 84.82it/s]Loading weights:  71%|███████▏  | 1026/1436 [00:08<00:00, 472.59it/s]Loading weights:  44%|████▍     | 629/1436 [00:08<00:08, 94.36it/s]Loading weights:  76%|███████▌  | 1092/1436 [00:08<00:00, 518.94it/s]Loading weights:  47%|████▋     | 671/1436 [00:08<00:04, 174.99it/s]Loading weights:  80%|████████  | 1154/1436 [00:09<00:00, 525.55it/s]Loading weights:  51%|█████     | 730/1436 [00:09<00:02, 281.16it/s]Loading weights:  86%|████████▌ | 1231/1436 [00:09<00:00, 564.31it/s]Loading weights:  55%|█████▍    | 786/1436 [00:09<00:01, 347.41it/s]Loading weights:  90%|████████▉ | 1290/1436 [00:09<00:00, 571.35it/s]Loading weights:  59%|█████▉    | 850/1436 [00:09<00:01, 414.81it/s]Loading weights:  94%|█████████▍| 1348/1436 [00:09<00:00, 562.68it/s]Loading weights:  65%|██████▍   | 928/1436 [00:09<00:01, 489.70it/s]Loading weights:  98%|█████████▊| 1410/1436 [00:09<00:00, 575.83it/s]Loading weights: 100%|██████████| 1436/1436 [00:09<00:00, 151.12it/s]
-Loading weights:  69%|██████▉   | 989/1436 [00:09<00:00, 522.35it/s]Loading weights:  73%|███████▎  | 1042/1436 [00:09<00:00, 518.64it/s]Loading weights:  78%|███████▊  | 1114/1436 [00:09<00:00, 572.30it/s]Loading weights:  82%|████████▏ | 1173/1436 [00:09<00:00, 577.36it/s]Loading weights:  86%|████████▋ | 1241/1436 [00:09<00:00, 598.13it/s]Loading weights:  91%|█████████ | 1302/1436 [00:10<00:00, 597.31it/s]Loading weights:  95%|█████████▍| 1364/1436 [00:10<00:00, 603.91it/s]Loading weights: 100%|█████████▉| 1429/1436 [00:10<00:00, 611.27it/s]Loading weights: 100%|██████████| 1436/1436 [00:10<00:00, 140.33it/s]
-RUN CONFIG: mode=compile text, vision compile image=https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg prompt_tokens=289 image_grid_thw=[[1, 32, 32]]
-warmup (compile) took 656.2s
- to=selfDescribe this image.
-
-We need describe visual content: pink cosmos flower with bumblebee, other flowers, wilted, green leaf background. Provide description.
-
-Probably concise but thorough.
-
-Let's output description.assistant to=userThe image is a close-up, slightly low-angle view of a flower bed in soft natural daylight.
-
-In the center of the frame a large, light-pink cosmos flower dominates. It has six broad, slightly ruffled petals arranged in a classic daisy-like form with a yellow-orange disc of stamens in the middle. A bumblebee, black and yellow/white with a fuzzy thorax, is perched on the flower’s center, its head buried in the stamens as it forages.
-
-To the left of the central bloom a second pink cosmos is partially visible, showing its pink petals and a bright yellow center. Around them the garden is a mix of life and decline: several spent, wilted pink blooms and dry, brown seed heads stand on thin stems, and a small bright red flower, possibly a geranium or similar, is visible near the bottom right, with a few more red blooms blurred behind it. A small white, dried flower head is also in the lower right.
-
-In the background a large
-
-prefill 289 tokens: TTFT 0.192s
-vision tower (compile): 0.068s of TTFT
-decode 255 tokens in 16.5s (15.4 tok/s)
-256 tokens in 16.7s (15.3 tok/s)
-████ RUNG R5 DONE ████
-════════ RUN DONE ════════
