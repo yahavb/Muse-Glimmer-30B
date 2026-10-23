@@ -2,7 +2,7 @@
 # Same settings as the validated job (muse-glimmer-30b-vllm-job.yaml). See docs/DEPLOY_VLLM.md.
 #
 # vLLM listens on 0.0.0.0:8000 (owner's decision): any pod in the cluster can call it at
-# <pod IP>:8000, without authentication. No Service / LoadBalancer: not reachable from outside.
+# <pod IP>:8000 or the Service below, without authentication. ClusterIP only: not reachable from outside.
 #   kubectl apply -f muse-glimmer-30b-vllm-deploy.yaml
 #   kubectl rollout status deploy/muse-glimmer-30b-vllm --timeout=60m   # first start compiles ~12 min
 #   kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000         # from your laptop
@@ -105,3 +105,19 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 32Gi
+---
+# Stable in-cluster name: http://muse-glimmer-30b-vllm.default.svc.cluster.local:8000/v1
+# ClusterIP only (no NodePort / LoadBalancer): reachable from inside the cluster, not outside.
+apiVersion: v1
+kind: Service
+metadata:
+  name: muse-glimmer-30b-vllm
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: muse-glimmer-30b-vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

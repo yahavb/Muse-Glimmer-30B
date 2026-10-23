@@ -7,7 +7,7 @@ plus this repo's model plugin (`vllm_plugin/`, loaded automatically via `vllm.ge
 
 | | |
 |---|---|
-| API | OpenAI chat completions, `http://<pod IP>:8000/v1` (or port-forward to `127.0.0.1:8000`) |
+| API | OpenAI chat completions, `http://muse-glimmer-30b-vllm:8000/v1` in-cluster (or port-forward to `127.0.0.1:8000`) |
 | Model name | `meta-models/Muse-Glimmer-30B` |
 | Inputs | text; 1 image per prompt; 1 video per prompt |
 | Images | resized to 448x448 (256 image tokens) |
@@ -30,7 +30,7 @@ kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000
 ```
 
 The server listens on `0.0.0.0:8000`: any pod in the cluster can call it at the pod's IP, with
-no authentication. There is no Service or LoadBalancer, so nothing outside the cluster reaches it.
+no authentication. The manifest adds a ClusterIP Service only (no NodePort / LoadBalancer), so nothing outside the cluster reaches it.
 From a laptop, use the port-forward above. Change `GIT_REF` in the manifest to pin a commit.
 
 ## Call it
@@ -73,9 +73,10 @@ A fuller client with timing (TTFT, decode tok/s, end to end): `vllm_plugin/tests
 
 ## Serving other workloads in the cluster
 
-Other pods call `http://<pod IP>:8000/v1` directly (`kubectl get pod -l app=muse-glimmer-30b-vllm -o wide`).
-For a stable name, add a ClusterIP Service on port 8000. To limit which pods can call it, add a
-NetworkPolicy for the caller's namespace/pods.
+Other pods call the ClusterIP Service in the manifest:
+`http://muse-glimmer-30b-vllm.default.svc.cluster.local:8000/v1` (no authentication). It is not
+reachable from outside the cluster. To limit which pods can call it, add a NetworkPolicy for the
+caller's namespace/pods.
 
 ## Limits
 
