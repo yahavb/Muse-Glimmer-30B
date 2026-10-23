@@ -22,16 +22,27 @@ reports that the engine process is up, so it stays green.
 A busy server never gets a heartbeat; its requests are the proof. The heartbeat only runs
 when nothing is running or waiting. It is an exec probe, so the pod opens no new port.
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `HEARTBEAT_S` | 60 | idle time without proof before a heartbeat |
-| `HEALTH_GRACE_S` | 60 | extra time before the probe fails |
-| `HEARTBEAT_TIMEOUT_S` | 20 | heartbeat request timeout (probe timeout is 30 s) |
-| `FAULT_INJECTION` | 1 in the deploy file | enables the fault file below |
+Demo timing in the deploy file (script defaults in brackets):
 
-Probes: startupProbe `/health` (up to 60 min), readinessProbe `/health`, livenessProbe this
-script every 30 s, restart after 3 failures. Expected time from a dead chip to a restart:
-up to about 2 min for the proof to go stale, then about 1.5 min of failures.
+| Setting | Deploy | Meaning |
+|---|---|---|
+| `HEARTBEAT_S` | 4 (60) | idle time without proof before a heartbeat |
+| `HEALTH_GRACE_S` | 4 (60) | fail when the last proof is older than `HEARTBEAT_S + HEALTH_GRACE_S` |
+| `HEARTBEAT_TIMEOUT_S` | 5 (20) | heartbeat request timeout |
+| `FAULT_INJECTION` | 1 (0) | enables the fault file below |
+
+Probes: livenessProbe runs this script every 5 s and restarts on the first failure;
+`terminationGracePeriodSeconds: 5`. startupProbe and readinessProbe use `/health`.
+
+Detection after a hang:
+1. Idle: the next probe (within 5 s) sends a heartbeat, which times out after 5 s. Proof is
+   then older than 8 s, so that probe fails: about 10 s.
+2. Busy: token counters stop; the first probe that finds them frozen for over 8 s fails:
+   8 to 13 s.
+
+Then about 5 s to stop the container and about 1.5 min to restart from the node cache.
+Trade-off: one slow probe restarts the server. A step that legitimately takes over 8 s
+with no token counted would too; raise `HEALTH_GRACE_S` outside demos.
 
 ## Simulating a device failure
 

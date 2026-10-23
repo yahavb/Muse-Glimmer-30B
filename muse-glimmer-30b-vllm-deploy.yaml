@@ -30,6 +30,7 @@ spec:
     spec:
       nodeSelector:
         node-type: trn3-dev1
+      terminationGracePeriodSeconds: 5  # a hung rank never exits cleanly; don't wait 30 s
       resourceClaims:
         - name: m-lnc2
           resourceClaimTemplateName: m-lnc2
@@ -98,12 +99,13 @@ spec:
             periodSeconds: 15
           # Device-level health: proof of life from token counters or a 1-token heartbeat
           # (scripts/vllm_health.py). vLLM's /health alone stays green when a rank hangs.
+          # Demo timing: detection within ~10 s of a hang, restart on the first failed probe.
           livenessProbe:
             exec:
               command: ["python3", "/tmp/repo/scripts/vllm_health.py"]
-            periodSeconds: 30
-            timeoutSeconds: 30
-            failureThreshold: 3
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 1
           resources:
             claims:
               - name: m-lnc2
@@ -142,12 +144,13 @@ spec:
             - name: NEFF_SOURCE
               value: "compile"
             # Health probe (scripts/vllm_health.py) and fault injection (docs/RESILIENCE_VLLM.md).
+            # Fail when the last proof of life is older than HEARTBEAT_S + HEALTH_GRACE_S (8 s).
             - name: HEARTBEAT_S
-              value: "60"
+              value: "4"
             - name: HEALTH_GRACE_S
-              value: "60"
+              value: "4"
             - name: HEARTBEAT_TIMEOUT_S
-              value: "20"
+              value: "5"
             - name: FAULT_INJECTION
               value: "1"
             - name: HF_TOKEN

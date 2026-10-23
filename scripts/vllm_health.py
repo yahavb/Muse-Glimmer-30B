@@ -28,7 +28,7 @@ HEARTBEAT_TIMEOUT_S = int(os.environ.get("HEARTBEAT_TIMEOUT_S", "20"))
 STATE_FILE = os.environ.get("HEALTH_STATE_FILE", "/tmp/muse_health.json")
 
 
-def get(path, timeout=5):
+def get(path, timeout=2):
     with urllib.request.urlopen(BASE + path, timeout=timeout) as r:
         return r.status, r.read().decode()
 
