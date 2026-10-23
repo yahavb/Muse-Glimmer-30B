@@ -1,12 +1,11 @@
 # Muse-Glimmer-30B on vLLM Neuron (trn3): long-running server for text, image and video.
 # Same settings as the validated job (muse-glimmer-30b-vllm-job.yaml). See docs/DEPLOY_VLLM.md.
 #
-# Private by default: vLLM listens on 127.0.0.1 inside the pod and there is no Service.
-# Reach it with `kubectl port-forward` (access = your cluster credentials):
+# vLLM listens on 0.0.0.0:8000 (owner's decision): any pod in the cluster can call it at
+# <pod IP>:8000, without authentication. No Service / LoadBalancer: not reachable from outside.
 #   kubectl apply -f muse-glimmer-30b-vllm-deploy.yaml
 #   kubectl rollout status deploy/muse-glimmer-30b-vllm --timeout=60m   # first start compiles ~12 min
-#   kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000         # then http://127.0.0.1:8000
-# Exposing it to other pods (Service + authentication) is a deliberate decision; see the doc.
+#   kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000         # from your laptop
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -44,25 +43,24 @@ spec:
               export HF_HOME=/tmp/hf_cache; mkdir -p "$HF_HOME"
               MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
               exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
-                --host 127.0.0.1 --port 8000 \
+                --host 0.0.0.0 --port 8000 \
                 --tensor-parallel-size 2 --max-model-len 2048 \
                 --max-num-seqs 1 --max-num-batched-tokens 1024 --num-gpu-blocks-override 512 \
                 --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
                 --additional-config '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 2080]}}'
-          # 127.0.0.1 bind -> probe from inside the pod
+          ports:
+            - name: http
+              containerPort: 8000
           startupProbe:
-            exec:
-              command: ["curl", "-sf", "http://127.0.0.1:8000/health"]
+            httpGet: {path: /health, port: http}
             periodSeconds: 20
             failureThreshold: 180  # up to 60 min: download + first compile
           readinessProbe:
-            exec:
-              command: ["curl", "-sf", "http://127.0.0.1:8000/health"]
+            httpGet: {path: /health, port: http}
             periodSeconds: 15
           livenessProbe:
-            exec:
-              command: ["curl", "-sf", "http://127.0.0.1:8000/health"]
+            httpGet: {path: /health, port: http}
             periodSeconds: 30
             failureThreshold: 6
           resources:

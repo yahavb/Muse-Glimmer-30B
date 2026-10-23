@@ -7,7 +7,7 @@ plus this repo's model plugin (`vllm_plugin/`, loaded automatically via `vllm.ge
 
 | | |
 |---|---|
-| API | OpenAI chat completions, `http://127.0.0.1:8000/v1` |
+| API | OpenAI chat completions, `http://<pod IP>:8000/v1` (or port-forward to `127.0.0.1:8000`) |
 | Model name | `meta-models/Muse-Glimmer-30B` |
 | Inputs | text; 1 image per prompt; 1 video per prompt |
 | Images | resized to 448x448 (256 image tokens) |
@@ -29,8 +29,9 @@ kubectl rollout status deploy/muse-glimmer-30b-vllm --timeout=60m
 kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000
 ```
 
-The server listens on `127.0.0.1` inside the pod and has no Service: only someone with cluster
-access (via `kubectl port-forward`) can reach it. Change `GIT_REF` in the manifest to pin a commit.
+The server listens on `0.0.0.0:8000`: any pod in the cluster can call it at the pod's IP, with
+no authentication. There is no Service or LoadBalancer, so nothing outside the cluster reaches it.
+From a laptop, use the port-forward above. Change `GIT_REF` in the manifest to pin a commit.
 
 ## Call it
 
@@ -72,11 +73,9 @@ A fuller client with timing (TTFT, decode tok/s, end to end): `vllm_plugin/tests
 
 ## Serving other workloads in the cluster
 
-Calling it from other pods needs a Service, which makes the server reachable by every pod
-that can route to it. vLLM has no built-in authentication beyond a static `--api-key`, so put a
-real gate in front first (for example, a NetworkPolicy that allows only the caller's
-namespace/pods, plus your platform's service authentication). That is a deliberate
-exposure decision; it is not part of this manifest.
+Other pods call `http://<pod IP>:8000/v1` directly (`kubectl get pod -l app=muse-glimmer-30b-vllm -o wide`).
+For a stable name, add a ClusterIP Service on port 8000. To limit which pods can call it, add a
+NetworkPolicy for the caller's namespace/pods.
 
 ## Limits
 
