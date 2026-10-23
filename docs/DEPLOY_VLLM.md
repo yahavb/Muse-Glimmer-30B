@@ -97,7 +97,7 @@ caller's namespace/pods.
 
 The liveness probe checks the devices, not just the process. Faults (`hang`, `crash`) can be
 injected per rank. Weights and NEFFs live on the node (`/opt/muse-glimmer-30b`);
-`NEFF_SOURCE=hostpath` loads NEFFs from there and never compiles. See `docs/RESILIENCE_VLLM.md`.
+`NEFF_SOURCE=hostpath` requires cached NEFFs there. See `docs/RESILIENCE_VLLM.md`.
 
 ## Limits
 

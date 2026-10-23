@@ -56,19 +56,28 @@ yet: it needs a known-answer heartbeat, and repeated requests are not yet bit-id
 
 ## NEFF cache on the node (`NEFF_SOURCE`)
 
-vllm-neuron keeps compiled graphs in `$VLLM_CACHE_ROOT/neuron/compile_cache`, keyed by the
-graph, input shapes, library and compiler versions, compiler flags and target. The deploy
-file sets `VLLM_CACHE_ROOT=/node-cache/vllm_cache` on a hostPath (`/opt/muse-glimmer-30b`),
-next to the HF weights (`/node-cache/hf_cache`), so both survive restarts.
+The deploy file puts three caches on a hostPath (`/opt/muse-glimmer-30b`, mounted at
+`/node-cache`), so they survive restarts:
 
-1. `NEFF_SOURCE=compile` (default): a cache miss compiles and writes the NEFF to the host
-   path. The first start compiles; later starts hit the cache.
-2. `NEFF_SOURCE=hostpath`: load only. Sets `VLLM_NEURON_DISABLE_WARMUP_COMPILE=1`, so a
-   miss stops startup with an error instead of compiling. Startup also stops if the cache
-   directory is empty.
+1. HF weights: `HF_HOME=/node-cache/hf_cache`.
+2. NEFFs: `VLLM_CACHE_ROOT=/node-cache/vllm_cache`. On the native route
+   (libtorch-neuronx-lite) they land in `neuron/native_neff_cache`, keyed by graph,
+   shapes, versions, compiler flags and target.
+3. NKI kernel binaries: `NKI_COMPILE_CACHE_URL=/node-cache/nki_cache`. Their index lives
+   under `VLLM_CACHE_ROOT`; with the binaries left in the container's `/var/tmp`, a restart
+   found the index but not the files and the compile failed (`NCC_EVRF059`). Startup now
+   drops index entries whose binary is missing.
+
+The startup log prints `NEFF cache: ... has N NEFFs at start`. The same N after a restart
+means every graph came from the cache. (No per-graph cache-hit line is logged at this
+log level.)
+
+1. `NEFF_SOURCE=compile` (default): a miss compiles and writes the NEFF to the node.
+2. `NEFF_SOURCE=hostpath`: refuses to start when the node has no NEFFs. vllm-neuron
+   0.29.0.1.2.0 has no fail-on-cache-miss flag (`VLLM_NEURON_DISABLE_WARMUP_COMPILE` is
+   in newer docs, not in this image), so a miss would still compile.
 
 Switch with `kubectl set env deploy/muse-glimmer-30b-vllm NEFF_SOURCE=hostpath`.
-Graph tracing still runs at startup (it computes the cache key); only `neuronx-cc` is skipped.
-Any change to the model code, flags, buckets or image gives new keys, so `hostpath` then
-fails until one `compile` start refills the cache. The cache is per node: the pod must
-land on the node that compiled (the deploy pins `node-type: trn3-dev1`).
+Graph tracing still runs at startup (it computes the cache key); only `neuronx-cc` is
+skipped. Any change to model code, flags, buckets or image gives new keys. The cache is per
+node; the deploy pins `node-type: trn3-dev1`.
