@@ -1,0 +1,109 @@
+# Muse-Glimmer-30B on vLLM Neuron (trn3): long-running server for text, image and video.
+# Same settings as the validated job (muse-glimmer-30b-vllm-job.yaml). See docs/DEPLOY_VLLM.md.
+#
+# Private by default: vLLM listens on 127.0.0.1 inside the pod and there is no Service.
+# Reach it with `kubectl port-forward` (access = your cluster credentials):
+#   kubectl apply -f muse-glimmer-30b-vllm-deploy.yaml
+#   kubectl rollout status deploy/muse-glimmer-30b-vllm --timeout=60m   # first start compiles ~12 min
+#   kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000         # then http://127.0.0.1:8000
+# Exposing it to other pods (Service + authentication) is a deliberate decision; see the doc.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: muse-glimmer-30b-vllm
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # the claim holds the chips; never run two pods at once
+  selector:
+    matchLabels:
+      app: muse-glimmer-30b-vllm
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-vllm
+    spec:
+      nodeSelector:
+        node-type: trn3-dev1
+      resourceClaims:
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
+      containers:
+        - name: vllm
+          image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-ec"
+            - |
+              set -euo pipefail
+              cd /tmp && rm -rf repo && git clone "$REPO_URL" repo && cd repo && git checkout -q "$GIT_REF"
+              echo "PROVENANCE commit: $(git rev-parse HEAD)"
+              python3 -m pip install -q --no-deps -e vllm_plugin
+              export HF_HOME=/tmp/hf_cache; mkdir -p "$HF_HOME"
+              MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
+              exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
+                --host 127.0.0.1 --port 8000 \
+                --tensor-parallel-size 2 --max-model-len 2048 \
+                --max-num-seqs 1 --max-num-batched-tokens 1024 --num-gpu-blocks-override 512 \
+                --limit-mm-per-prompt '{"image": 1, "video": 1}' \
+                --media-io-kwargs '{"video": {"num_frames": -1}}' \
+                --additional-config '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 2080]}}'
+          # 127.0.0.1 bind -> probe from inside the pod
+          startupProbe:
+            exec:
+              command: ["curl", "-sf", "http://127.0.0.1:8000/health"]
+            periodSeconds: 20
+            failureThreshold: 180  # up to 60 min: download + first compile
+          readinessProbe:
+            exec:
+              command: ["curl", "-sf", "http://127.0.0.1:8000/health"]
+            periodSeconds: 15
+          livenessProbe:
+            exec:
+              command: ["curl", "-sf", "http://127.0.0.1:8000/health"]
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            claims:
+              - name: m-lnc2
+            requests:
+              cpu: 22
+              memory: 220Gi
+              ephemeral-storage: 120Gi
+            limits:
+              cpu: 44
+              memory: 400Gi
+              ephemeral-storage: 200Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: NEURON_CC_FLAGS
+              value: "--model-type=transformer"
+            - name: NEURON_RT_LOG_LEVEL
+              value: "ERROR"
+            - name: NEURON_CC_LOG_LEVEL
+              value: "ERROR"
+            - name: TORCH_DEVICE_BACKEND_AUTOLOAD
+              value: "0"
+            - name: VLLM_NEURON_BACKEND
+              value: "neuron_native"
+            - name: REPO_URL
+              value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
+            # pin to a validated commit
+            - name: GIT_REF
+              value: "exp/vllm-phase2"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
