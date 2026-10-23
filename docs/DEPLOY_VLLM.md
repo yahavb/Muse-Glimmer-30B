@@ -16,6 +16,21 @@ plus this repo's model plugin (`vllm_plugin/`, loaded automatically via `vllm.ge
 | Hardware | `m-lnc2` claim (2 trn3 devices), TP=2 |
 | First start | ~12 min (model download + compile) |
 
+## Two stacks: bare TorchNeuron vs vLLM
+
+| | Bare bring-up (R1-R5, V3-V5, profiles) | vLLM serving |
+|---|---|---|
+| Image | `public.ecr.aws/neuron/torch-neuronx:2.14.0-neuronx-py314-sdk2.33.0-ubuntu26.04` | `public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04` |
+| Neuron PyTorch library | **`torch-neuronx`** (TorchNeuron) 2.14.3.0.1 | **`libtorch-neuronx-lite`** (pulled in by vllm-neuron) |
+| torch | 2.14.0 | 2.13.0 |
+| transformers | 5.20.2 | 5.17.0 |
+| Serving | our scripts (`run_muse_glimmer.py`) | vLLM 0.29.0 + vllm-neuron 0.29.0.1.2.0 + this repo's `vllm_plugin/` |
+| Compile | `torch.compile(fullgraph=True, backend="neuron")` | vllm-neuron's `torch.compile` (`fullgraph=True`, `VLLM_NEURON_BACKEND=neuron_native`) |
+| Env | — | `TORCH_DEVICE_BACKEND_AUTOLOAD=0` (keep `torch-neuronx` from loading if present) |
+| SDK | 2.33 | 2.33 |
+
+The model math in `vllm_plugin/` mirrors the bare path (plain PyTorch); the libraries under it differ.
+
 ## Prerequisites
 
 1. A trn3 node labeled `node-type: trn3-dev1` and the `m-lnc2` ResourceClaimTemplate.
