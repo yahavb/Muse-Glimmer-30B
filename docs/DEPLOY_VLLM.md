@@ -93,6 +93,12 @@ Other pods call the ClusterIP Service in the manifest:
 reachable from outside the cluster. To limit which pods can call it, add a NetworkPolicy for the
 caller's namespace/pods.
 
+## Health, fault injection, NEFF cache
+
+The liveness probe checks the devices, not just the process. Faults (`hang`, `crash`) can be
+injected per rank. Weights and NEFFs live on the node (`/opt/muse-glimmer-30b`);
+`NEFF_SOURCE=hostpath` loads NEFFs from there and never compiles. See `docs/RESILIENCE_VLLM.md`.
+
 ## Limits
 
 - One request at a time (`--max-num-seqs 1`), as validated. Raising it needs more decode buckets

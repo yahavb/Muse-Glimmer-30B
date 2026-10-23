@@ -6,6 +6,11 @@
 #   kubectl apply -f muse-glimmer-30b-vllm-deploy.yaml
 #   kubectl rollout status deploy/muse-glimmer-30b-vllm --timeout=60m   # first start compiles ~12 min
 #   kubectl port-forward deploy/muse-glimmer-30b-vllm 8000:8000         # from your laptop
+#
+# Node cache (hostPath /opt/muse-glimmer-30b): weights and compiled NEFFs survive restarts.
+# NEFF_SOURCE=compile (default) compiles on a cache miss and writes the NEFFs there;
+# NEFF_SOURCE=hostpath only loads them from there, and a miss stops startup (no compile).
+# Device health and fault injection: docs/RESILIENCE_VLLM.md.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,7 +45,20 @@ spec:
               cd /tmp && rm -rf repo && git clone "$REPO_URL" repo && cd repo && git checkout -q "$GIT_REF"
               echo "PROVENANCE commit: $(git rev-parse HEAD)"
               python3 -m pip install -q --no-deps -e vllm_plugin
-              export HF_HOME=/tmp/hf_cache; mkdir -p "$HF_HOME"
+              # Node cache (hostPath, local disk): HF weights + vllm-neuron compile cache
+              # ($VLLM_CACHE_ROOT/neuron/compile_cache, keyed by graph + versions + compiler args).
+              export HF_HOME=/node-cache/hf_cache VLLM_CACHE_ROOT=/node-cache/vllm_cache
+              mkdir -p "$HF_HOME" "$VLLM_CACHE_ROOT"
+              NEFF_DIR="$VLLM_CACHE_ROOT/neuron/compile_cache"
+              echo "NEFF cache: $NEFF_DIR ($(find "$NEFF_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) entries), NEFF_SOURCE=$NEFF_SOURCE"
+              case "$NEFF_SOURCE" in
+                compile) ;;
+                hostpath)
+                  [ -n "$(find "$NEFF_DIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null)" ] \
+                    || { echo "NEFF_SOURCE=hostpath but $NEFF_DIR is empty; run once with NEFF_SOURCE=compile"; exit 1; }
+                  export VLLM_NEURON_DISABLE_WARMUP_COMPILE=1 ;;  # cache miss = fatal, never compile
+                *) echo "NEFF_SOURCE must be compile or hostpath"; exit 1 ;;
+              esac
               MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
               exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
                 --host 0.0.0.0 --port 8000 \
@@ -59,10 +77,14 @@ spec:
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 15
+          # Device-level health: proof of life from token counters or a 1-token heartbeat
+          # (scripts/vllm_health.py). vLLM's /health alone stays green when a rank hangs.
           livenessProbe:
-            httpGet: {path: /health, port: http}
+            exec:
+              command: ["python3", "/tmp/repo/scripts/vllm_health.py"]
             periodSeconds: 30
-            failureThreshold: 6
+            timeoutSeconds: 30
+            failureThreshold: 3
           resources:
             claims:
               - name: m-lnc2
@@ -77,6 +99,8 @@ spec:
           volumeMounts:
             - name: dshm
               mountPath: /dev/shm
+            - name: node-cache
+              mountPath: /node-cache
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
@@ -95,6 +119,18 @@ spec:
             # pin to a validated commit
             - name: GIT_REF
               value: "exp/vllm-phase2"
+            # compile: compile on a miss (NEFFs land on the node cache); hostpath: load only.
+            - name: NEFF_SOURCE
+              value: "compile"
+            # Health probe (scripts/vllm_health.py) and fault injection (docs/RESILIENCE_VLLM.md).
+            - name: HEARTBEAT_S
+              value: "60"
+            - name: HEALTH_GRACE_S
+              value: "60"
+            - name: HEARTBEAT_TIMEOUT_S
+              value: "20"
+            - name: FAULT_INJECTION
+              value: "1"
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -105,6 +141,11 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 32Gi
+        # Weights + compiled NEFFs, kept on the node across restarts (see the script).
+        - name: node-cache
+          hostPath:
+            path: /opt/muse-glimmer-30b
+            type: DirectoryOrCreate
 ---
 # Stable in-cluster name: http://muse-glimmer-30b-vllm.default.svc.cluster.local:8000/v1
 # ClusterIP only (no NodePort / LoadBalancer): reachable from inside the cluster, not outside.

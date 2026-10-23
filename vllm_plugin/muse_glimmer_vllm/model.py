@@ -41,6 +41,7 @@ from vllm_neuron.utils.weight_loader import (
     sharding_weight_loader,
 )
 
+from . import faults
 from .config import MuseGlimmerTextConfig
 
 logger = logging.getLogger(__name__)
@@ -421,6 +422,7 @@ class MuseGlimmerForCausalLM(nn.Module):
 
     @classmethod
     def from_configs(cls, hf_config: PretrainedConfig, neuron_config: NeuronConfig, encoder_neuron_config=None):
+        faults.install()  # no-op unless FAULT_INJECTION=1; here because only workers build the model
         return cls(MuseGlimmerTextConfig.from_configs(hf_config, neuron_config), hf_config, encoder_neuron_config)
 
     # ── vision: runner hooks (vllm-neuron VLM contract) ──
