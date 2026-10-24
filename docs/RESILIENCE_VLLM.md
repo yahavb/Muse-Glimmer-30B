@@ -40,6 +40,10 @@ Detection after a hang:
 2. Busy: token counters stop; the first probe that finds them frozen for over 8 s fails:
    8 to 13 s.
 
+Right after a restart, kubelet can run one liveness probe before the startupProbe takes
+over; with `failureThreshold: 1` that killed the new container once (seen 2026-10-24). The
+script now passes while the server has never answered in this container.
+
 Then about 5 s to stop the container and about 1.5 min to restart from the node cache.
 Trade-off: one slow probe restarts the server. A step that legitimately takes over 8 s
 with no token counted would too; raise `HEALTH_GRACE_S` outside demos.

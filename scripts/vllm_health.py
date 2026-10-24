@@ -66,6 +66,12 @@ def main():
             return 1
         m = counters(get("/metrics")[1])
     except Exception as e:  # noqa: BLE001 - any failure to reach the server is a failed probe
+        if not os.path.exists(STATE_FILE):
+            # This container has never served (STATE_FILE is written only after the server
+            # answered). The startupProbe owns this phase; a liveness probe that kubelet
+            # runs right after a restart must not kill the new container.
+            print(f"starting: server not up yet ({e})")
+            return 0
         print(f"UNHEALTHY: server unreachable: {e}")
         return 1
 
