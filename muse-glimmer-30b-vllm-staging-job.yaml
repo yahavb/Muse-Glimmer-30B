@@ -1,0 +1,194 @@
+# Muse-Glimmer-30B in vllm-neuron itself (the in-tree port, on a vllm-neuron branch),
+# on the same container as muse-glimmer-30b-vllm-job.yaml (DLC 0.29.0.1.2.0, SDK 2.33), trn3, TP=2.
+# Same model math, server flags and client as the validated plugin job. Differences:
+#   - the job installs the private vllm-neuron branch over the container's vllm-neuron (editable,
+#     no build isolation). That branch pins vllm==0.32.0 (torch 2.13.0, like 0.29);
+#     the container's Neuron compiler / runtime / libtorch-neuronx-lite stay as shipped.
+#   - this repo's vllm_plugin/ is NOT installed: the model comes from vllm_neuron.model.muse_glimmer.
+#
+# Needs secret `vllm-neuron-git` with keys GITHUB_TOKEN (read access) and VLLM_NEURON_REPO (https URL):
+#   kubectl create secret generic vllm-neuron-git \
+#     --from-literal=GITHUB_TOKEN=<token> --from-literal=VLLM_NEURON_REPO=<https url of the private repo>
+#
+# Launch:
+#   kubectl delete job muse-glimmer-30b-vllm-staging --ignore-not-found
+#   kubectl apply -f muse-glimmer-30b-vllm-staging-job.yaml
+#   kubectl logs job/muse-glimmer-30b-vllm-staging > /tmp/muse-glimmer-30b-vllm-staging
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: muse-glimmer-30b-vllm-staging
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-vllm-staging
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-type: trn3-dev1
+      resourceClaims:
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
+      containers:
+        - name: vllm
+          image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-ec"
+            - |
+              set -euo pipefail
+              JOB_T0=$(date +%s); export STEP_TIMES=/tmp/step_times.tsv; : > "$STEP_TIMES"
+              t_mark() {
+                local now; now=$(date +%s)
+                [ -n "${T_NAME:-}" ] && printf '%s\t%s\n' "$((now - T_START))" "$T_NAME" >> "$STEP_TIMES"
+                T_NAME="$1"; T_START=$now
+              }
+              t_mark "git clone"
+              cd /tmp && git clone -b "$BRANCH" "$REPO_URL" repo && cd repo
+              GIT_SHA=$(git rev-parse HEAD)
+              echo "┌── PROVENANCE ──"
+              echo "│ repo   : $REPO_URL  branch: $(git rev-parse --abbrev-ref HEAD) (requested $BRANCH)"
+              echo "│ commit : $GIT_SHA"
+              echo "│ subject: $(git log -1 --pretty=%s)"
+              echo "└────────────────"
+
+              t_mark "clone + install vllm-neuron branch"
+              AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+              git -c http.extraHeader="Authorization: Basic $AUTH" clone -q -b "$VLLM_NEURON_BRANCH" "$VLLM_NEURON_REPO" /tmp/vllm-neuron
+              unset AUTH GITHUB_TOKEN
+              echo "PROVENANCE vllm-neuron: branch $VLLM_NEURON_BRANCH commit $(git -C /tmp/vllm-neuron rev-parse HEAD) — $(git -C /tmp/vllm-neuron log -1 --pretty=%s)"
+              python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==" | sed 's/^/PROVENANCE before: /' || true
+              # editable install, no build isolation, empty vLLM target device
+              VLLM_TARGET_DEVICE=empty python3 -m pip install -q --no-build-isolation \
+                --extra-index-url https://pip.repos.neuron.amazonaws.com -e /tmp/vllm-neuron 2>&1 | tail -5
+              python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==|vllm-neuron" | sed 's/^/PROVENANCE after: /' || true
+              python3 -c 'import vllm, vllm_neuron, transformers, torch; from importlib.metadata import entry_points as e; print("PROVENANCE STACK: vllm", vllm.__version__, "torch", torch.__version__, "transformers", transformers.__version__, "| vllm_neuron at", vllm_neuron.__path__[0], "| general plugins:", sorted(x.name for x in e(group="vllm.general_plugins")))'
+              python3 -c 'from vllm_neuron.model.registry import get_models; m = dict(get_models()); c = m["MuseGlimmerForConditionalGeneration"]; print("PROVENANCE in-tree model:", c.__module__)'
+              python3 -c 'from transformers import AutoConfig; import transformers.models.muse_glimmer as m; print("PROVENANCE transformers has muse_glimmer:", m.__name__)'
+
+              t_mark "model download"
+              export HF_HOME=/tmp/hf_cache; mkdir -p "$HF_HOME"
+              MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
+              echo "MODEL_DIR=$MODEL_DIR"
+
+              if [ "$CPU_CHECK" = "1" ]; then
+                t_mark "CPU-mode tiny check (vLLM vs HF, greedy)"
+                echo "════════ CPU-MODE TINY CHECK ════════"
+                VLLM_NEURON_CPU_MODE=1 python3 vllm_plugin/tests/test_tiny_cpu.py \
+                  --config "$MODEL_DIR/config.json" --tp 1 2 2>&1 | tee /tmp/cpu_check.txt \
+                  | grep -E "HF reference|TP=|RESULT|Error|Traceback" || true
+                grep -q "RESULT: PASS" /tmp/cpu_check.txt || { echo "CPU CHECK did not pass — not starting the device server"; tail -60 /tmp/cpu_check.txt; exit 1; }
+              fi
+
+              t_mark "vllm serve: load + compile + warmup"
+              echo "════════ VLLM SERVE (TP=$TP_DEGREE) ════════"
+              vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
+                --host 127.0.0.1 --port 8000 \
+                --tensor-parallel-size "$TP_DEGREE" --max-model-len "$MAX_MODEL_LEN" \
+                --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+                --num-gpu-blocks-override "$NUM_GPU_BLOCKS" --limit-mm-per-prompt '{"image": 1, "video": 1}' \
+                --media-io-kwargs '{"video": {"num_frames": -1}}' \
+                --additional-config "$ADDITIONAL_CONFIG" > >(tee /tmp/vllm_server.log) 2>&1 &
+              SERVER=$!
+              for _ in $(seq 1 720); do  # up to 2h for compile
+                curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1 && break
+                kill -0 "$SERVER" 2>/dev/null || { echo "SERVER EXITED — engine errors:"; grep -nE "ERROR|Error|error:" /tmp/vllm_server.log | grep -v APIServer | head -60; exit 1; }
+                sleep 10
+              done
+              curl -sf http://127.0.0.1:8000/health >/dev/null || { echo "SERVER NOT READY — engine errors:"; grep -nE "ERROR|Error|error:" /tmp/vllm_server.log | grep -v APIServer | head -60; exit 1; }
+              echo "server ready"; grep -iE "warmup|compil|bucket|NEFF|KV cache|blocks" /tmp/vllm_server.log | tail -15 || true
+
+              t_mark "client: text -> image (+cases) -> text -> video -> text+image+video"
+              python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
+                --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
+              t_mark ""
+              kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
+              echo "════════ SERVER LOG (errors / tail) ════════"
+              grep -iE "error|traceback|exception" /tmp/vllm_server.log | head -20 || true
+              tail -20 /tmp/vllm_server.log
+              echo "════════ E2E TIMING ════════"
+              python3 scripts/print_step_times.py "$STEP_TIMES" "$(( $(date +%s) - JOB_T0 ))"
+              echo "════════ RUN DONE ($GIT_SHA) ════════"
+          resources:
+            claims:
+              - name: m-lnc2
+            requests:
+              cpu: 22
+              memory: 220Gi
+              ephemeral-storage: 120Gi
+            limits:
+              cpu: 44
+              memory: 400Gi
+              ephemeral-storage: 200Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # same compiler/runtime settings as the validated TorchNeuron jobs
+            - name: NEURON_CC_FLAGS
+              value: "--model-type=transformer"
+            - name: NEURON_RT_LOG_LEVEL
+              value: "ERROR"
+            - name: NEURON_CC_LOG_LEVEL
+              value: "ERROR"
+            # the image may carry torch-neuronx too; vllm-neuron compiles via libtorch-neuronx-lite
+            - name: TORCH_DEVICE_BACKEND_AUTOLOAD
+              value: "0"
+            # native torch.compile path (vllm-neuron's default; explicit for provenance).
+            # See https://awsdocs-neuron.readthedocs-hosted.com/en/latest/inference-native-pytorch.html
+            - name: VLLM_NEURON_BACKEND
+              value: "neuron_native"
+            # print the real cause when a kernel fails during tracing (else it is hidden)
+            - name: TORCHDYNAMO_VERBOSE
+              value: "1"
+            - name: REPO_URL
+              value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
+            - name: BRANCH
+              value: "exp/vllm-phase2"
+            - name: CPU_CHECK
+              value: "0"
+            - name: TP_DEGREE
+              value: "2"
+            # Memory knobs matched to the bare bring-up (TP=2, m-lnc2): one sequence at a
+            # time, context = prompt + 256 new tokens (text 34, image 289, video 584).
+            - name: MAX_MODEL_LEN
+              value: "2048"
+            - name: MAX_NUM_SEQS
+              value: "1"
+            - name: MAX_NUM_BATCHED_TOKENS
+              value: "1024"
+            # exact KV: 2048 tokens / 32-token blocks = 64 blocks per KV-cache group; vLLM
+            # makes 4 groups (log: per_group=[32,32,32,32]) -> 256 for one sequence; 512 = 2x
+            - name: NUM_GPU_BLOCKS
+              value: "512"
+            # few buckets -> few NEFFs -> shorter first compile
+            - name: ADDITIONAL_CONFIG
+              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 2080]}}'
+            - name: VLLM_NEURON_BRANCH
+              value: "muse-glimmer-30b"
+            - name: VLLM_NEURON_REPO
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: VLLM_NEURON_REPO
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: GITHUB_TOKEN
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
