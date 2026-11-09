@@ -43,6 +43,7 @@ spec:
             - /bin/bash
             - "-ec"
             - |
+              [ -f /opt/neuron-top-patch/neuron-monitor-top.py ] && install -m 755 /opt/neuron-top-patch/neuron-monitor-top.py "$(command -v neuron-monitor-top.py || echo /opt/aws/neuron/bin/neuron-monitor-top.py)" 2>/dev/null && echo "neuron-top: patched (preview)" || true   # neuron-top-patch: temporary, remove when the updated neuron-top ships in the Neuron SDK
               set -euo pipefail
               python3 -m pip install -q -U "transformers>=5.20" accelerate pillow
               # image processor needs torchvision; pin to the image's torch 2.14.0 and
@@ -103,6 +104,7 @@ spec:
               memory: 400Gi
               ephemeral-storage: 200Gi
           volumeMounts:
+            - {name: neuron-top-patch, mountPath: /opt/neuron-top-patch, readOnly: true}   # neuron-top-patch
             - name: code
               mountPath: /code
             - name: dshm
@@ -135,6 +137,8 @@ spec:
                   name: hf-token
                   key: HF_TOKEN
       volumes:
+        - name: neuron-top-patch   # neuron-top-patch: temporary, remove when the updated neuron-top ships in the Neuron SDK
+          configMap: {name: neuron-top-patch, optional: true}
         - name: code
           configMap:
             name: muse-glimmer-code
