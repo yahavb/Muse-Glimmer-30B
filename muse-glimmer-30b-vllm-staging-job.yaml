@@ -3,7 +3,7 @@
 # Same model math, server flags and client as the validated plugin job. Differences:
 #   - the server splits the model's to=self reasoning channel out of the answer (vLLM's
 #     muse_glimmer reasoning parser) and defaults to reasoning strength low (chat template
-#     kwarg), so OpenAI clients such as VLMEvalKit (POPE) get only the final answer.
+#     kwarg), so OpenAI clients get only the final answer.
 #   - the job installs the private vllm-neuron branch over the container's vllm-neuron (editable,
 #     no build isolation). That branch pins vllm==0.32.0 (torch 2.13.0, like 0.29);
 #     the container's Neuron compiler / runtime / libtorch-neuronx-lite stay as shipped.
@@ -111,30 +111,30 @@ spec:
               python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
                 --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
 
-              if [ "$RUN_POPE" = "1" ]; then
-                # Same accuracy benchmark as the vllm-neuron Qwen3-VL model recipe: POPE (5,000 yes/no
-                # object questions; adversarial / popular / random) with VLMEvalKit @fd3884b over the
-                # OpenAI endpoint, --max-tokens 256, rule-based yes/no scoring (no judge model).
-                # VLMEvalKit lives in its own venv, so the server's torch / vLLM stay untouched.
-                t_mark "POPE: install VLMEvalKit (own venv)"
-                uv venv -q -p 3.12 /tmp/vlmenv
-                git clone -q https://github.com/open-compass/VLMEvalKit.git /tmp/VLMEvalKit
-                git -C /tmp/VLMEvalKit checkout -q fd3884b
-                VIRTUAL_ENV=/tmp/vlmenv uv pip install -q --index-strategy unsafe-best-match \
-                  --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision /tmp/VLMEvalKit 2>&1 | tail -3
-                echo "PROVENANCE VLMEvalKit: $(git -C /tmp/VLMEvalKit rev-parse HEAD)"
-                t_mark "POPE: 5,000 questions"
-                echo "════════ POPE (VLMEvalKit) ════════"
-                POPE_T0=$(date +%s)
-                ( cd /tmp && LMUData=/tmp/LMUData /tmp/vlmenv/bin/python VLMEvalKit/run.py --data POPE \
-                    --model Muse-Glimmer-30B --base-url http://127.0.0.1:8000/v1 --max-tokens 256 \
-                    --judge exact_matching --api-nproc "$POPE_NPROC" --timeout 600 --work-dir /tmp/pope_out \
-                    > /tmp/pope.log 2>&1 ) || echo "POPE FAILED (exit $?)"
-                echo "POPE wall time: $(( $(date +%s) - POPE_T0 )) s"
-                grep -iE "error|traceback|failed to obtain" /tmp/pope.log | sort | uniq -c | sort -rn | head -10 || true
-                for f in $(find /tmp/pope_out -name "*POPE*score*.csv" 2>/dev/null); do echo "── $f"; cat "$f"; done
-                [ -n "$(find /tmp/pope_out -name '*POPE*score*.csv' 2>/dev/null)" ] || tail -40 /tmp/pope.log
+              if [ "$RUN_BENCH" = "1" ]; then
+                # Latency/throughput as the vllm-neuron VLM guide (onboarding-vlm-models, step 5):
+                # vllm bench serve with the random-mm dataset (synthetic image + random text).
+                # Shapes kept inside the validated envelope: one 448x448 image (the compiled image
+                # graph, 256 tokens) + 512 random text tokens -> one 1024-token prefill bucket;
+                # 128 output tokens forced (--ignore-eos); one request at a time (MAX_NUM_SEQS=1).
+                BENCH_COMMON="--backend openai-chat --endpoint /v1/chat/completions --base-url http://127.0.0.1:8000 \
+                  --model Muse-Glimmer-30B --tokenizer $MODEL_DIR --num-prompts $BENCH_PROMPTS --max-concurrency 1 \
+                  --ignore-eos --temperature 0 --seed 0 --percentile-metrics ttft,tpot,itl,e2el --metric-percentiles 50,90,99"
+                t_mark "bench: image + text (random-mm, $BENCH_PROMPTS prompts)"
+                echo "════════ BENCH image+text: 1x 448x448 image + 512 text in, 128 out ════════"
+                vllm bench serve $BENCH_COMMON --dataset-name random-mm \
+                  --random-input-len 512 --random-output-len 128 \
+                  --random-mm-base-items-per-request 1 --random-mm-num-mm-items-range-ratio 0.0 \
+                  --random-mm-limit-mm-per-prompt '{"image": 1, "video": 0}' \
+                  --random-mm-bucket-config '{(448, 448, 1): 1.0}' > /tmp/bench_image.log 2>&1 || echo "BENCH image FAILED"
+                tail -45 /tmp/bench_image.log
+                t_mark "bench: text only (random, $BENCH_PROMPTS prompts)"
+                echo "════════ BENCH text only: 512 in, 128 out ════════"
+                vllm bench serve $BENCH_COMMON --dataset-name random \
+                  --random-input-len 512 --random-output-len 128 > /tmp/bench_text.log 2>&1 || echo "BENCH text FAILED"
+                tail -45 /tmp/bench_text.log
               fi
+
               t_mark ""
               kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
               echo "════════ SERVER LOG (errors / tail) ════════"
@@ -207,12 +207,11 @@ spec:
             # Must equal the RCT's logicalNeuronCore; to change LNC, pick a different RCT.
             - name: NEURON_LOGICAL_NC_CONFIG
               value: "2"
-            # POPE accuracy run after the smoke client (as the Qwen3-VL model recipe); 0 = smoke only
-            - name: RUN_POPE
+            # latency benchmark after the smoke client (vllm bench serve, as the vllm-neuron VLM guide)
+            - name: RUN_BENCH
               value: "1"
-            # parallel requests; the server runs one sequence at a time (MAX_NUM_SEQS=1)
-            - name: POPE_NPROC
-              value: "2"
+            - name: BENCH_PROMPTS
+              value: "100"
             - name: VLLM_NEURON_BRANCH
               value: "muse-glimmer-30b"
             - name: VLLM_NEURON_REPO
