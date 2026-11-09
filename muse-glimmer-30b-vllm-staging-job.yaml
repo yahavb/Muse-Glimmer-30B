@@ -111,6 +111,30 @@ spec:
               python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
                 --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
 
+              if [ "$RUN_POPE" = "1" ]; then
+                # Same accuracy benchmark as the vllm-neuron Qwen3-VL model recipe: POPE (5,000 yes/no
+                # object questions; adversarial / popular / random) with VLMEvalKit @fd3884b over the
+                # OpenAI endpoint, --max-tokens 256, rule-based yes/no scoring (no judge model).
+                # VLMEvalKit lives in its own venv, so the server's torch / vLLM stay untouched.
+                t_mark "POPE: install VLMEvalKit (own venv)"
+                uv venv -q -p 3.12 /tmp/vlmenv
+                git clone -q https://github.com/open-compass/VLMEvalKit.git /tmp/VLMEvalKit
+                git -C /tmp/VLMEvalKit checkout -q fd3884b
+                VIRTUAL_ENV=/tmp/vlmenv uv pip install -q --index-strategy unsafe-best-match \
+                  --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision /tmp/VLMEvalKit 2>&1 | tail -3
+                echo "PROVENANCE VLMEvalKit: $(git -C /tmp/VLMEvalKit rev-parse HEAD)"
+                t_mark "POPE: 5,000 questions"
+                echo "════════ POPE (VLMEvalKit) ════════"
+                POPE_T0=$(date +%s)
+                ( cd /tmp && LMUData=/tmp/LMUData /tmp/vlmenv/bin/python VLMEvalKit/run.py --data POPE \
+                    --model Muse-Glimmer-30B --base-url http://127.0.0.1:8000/v1 --max-tokens 256 \
+                    --judge exact_matching --api-nproc "$POPE_NPROC" --timeout 600 --work-dir /tmp/pope_out \
+                    > /tmp/pope.log 2>&1 ) || echo "POPE FAILED (exit $?)"
+                echo "POPE wall time: $(( $(date +%s) - POPE_T0 )) s"
+                grep -iE "error|traceback|failed to obtain" /tmp/pope.log | sort | uniq -c | sort -rn | head -10 || true
+                for f in $(find /tmp/pope_out -name "*POPE*score*.csv" 2>/dev/null); do echo "── $f"; cat "$f"; done
+                [ -n "$(find /tmp/pope_out -name '*POPE*score*.csv' 2>/dev/null)" ] || tail -40 /tmp/pope.log
+              fi
               if [ "$RUN_BENCH" = "1" ]; then
                 # Latency/throughput as the vllm-neuron VLM guide (onboarding-vlm-models, step 5):
                 # vllm bench serve with the random-mm dataset (synthetic image + random text).
@@ -209,7 +233,13 @@ spec:
               value: "2"
             # latency benchmark after the smoke client (vllm bench serve, as the vllm-neuron VLM guide)
             - name: RUN_BENCH
+              value: "0"
+            # POPE accuracy (as the vllm-neuron Qwen3-VL model recipe: VLMEvalKit @fd3884b, max-tokens 256)
+            - name: RUN_POPE
               value: "1"
+            # parallel requests; the server runs one sequence at a time (MAX_NUM_SEQS=1)
+            - name: POPE_NPROC
+              value: "2"
             - name: BENCH_PROMPTS
               value: "100"
             - name: VLLM_NEURON_BRANCH
