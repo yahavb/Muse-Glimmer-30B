@@ -87,7 +87,7 @@ spec:
 
               t_mark "vllm serve: load + compile + warmup"
               echo "════════ VLLM SERVE (TP=$TP_DEGREE) ════════"
-              vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
+              vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B Muse-Glimmer-30B \
                 --host 127.0.0.1 --port 8000 \
                 --tensor-parallel-size "$TP_DEGREE" --max-model-len "$MAX_MODEL_LEN" \
                 --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
@@ -106,6 +106,31 @@ spec:
               t_mark "client: text -> image (+cases) -> text -> video -> text+image+video"
               python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
                 --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
+
+              if [ "$RUN_POPE" = "1" ]; then
+                # Same accuracy benchmark as the vllm-neuron Qwen3-VL model recipe: POPE (5,000 yes/no
+                # object questions; adversarial / popular / random) with VLMEvalKit @fd3884b over the
+                # OpenAI endpoint, --max-tokens 256, rule-based yes/no scoring (no judge model).
+                # VLMEvalKit lives in its own venv, so the server's torch / vLLM stay untouched.
+                t_mark "POPE: install VLMEvalKit (own venv)"
+                uv venv -q -p 3.12 /tmp/vlmenv
+                git clone -q https://github.com/open-compass/VLMEvalKit.git /tmp/VLMEvalKit
+                git -C /tmp/VLMEvalKit checkout -q fd3884b
+                VIRTUAL_ENV=/tmp/vlmenv uv pip install -q --index-strategy unsafe-best-match \
+                  --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision /tmp/VLMEvalKit 2>&1 | tail -3
+                echo "PROVENANCE VLMEvalKit: $(git -C /tmp/VLMEvalKit rev-parse HEAD)"
+                t_mark "POPE: 5,000 questions"
+                echo "════════ POPE (VLMEvalKit) ════════"
+                POPE_T0=$(date +%s)
+                ( cd /tmp && LMUData=/tmp/LMUData /tmp/vlmenv/bin/python VLMEvalKit/run.py --data POPE \
+                    --model Muse-Glimmer-30B --base-url http://127.0.0.1:8000/v1 --max-tokens 256 \
+                    --judge exact_matching --api-nproc "$POPE_NPROC" --timeout 600 --work-dir /tmp/pope_out \
+                    > /tmp/pope.log 2>&1 ) || echo "POPE FAILED (exit $?)"
+                echo "POPE wall time: $(( $(date +%s) - POPE_T0 )) s"
+                grep -iE "error|traceback|failed to obtain" /tmp/pope.log | sort | uniq -c | sort -rn | head -10 || true
+                for f in $(find /tmp/pope_out -name "*POPE*score*.csv" 2>/dev/null); do echo "── $f"; cat "$f"; done
+                [ -n "$(find /tmp/pope_out -name '*POPE*score*.csv' 2>/dev/null)" ] || tail -40 /tmp/pope.log
+              fi
               t_mark ""
               kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
               echo "════════ SERVER LOG (errors / tail) ════════"
@@ -177,6 +202,12 @@ spec:
             # which overrides the claim and fails the weight load (NRT_RESOURCE).
             # Must equal the RCT's logicalNeuronCore; to change LNC, pick a different RCT.
             - name: NEURON_LOGICAL_NC_CONFIG
+              value: "2"
+            # POPE accuracy run after the smoke client (as the Qwen3-VL model recipe); 0 = smoke only
+            - name: RUN_POPE
+              value: "1"
+            # parallel requests; the server runs one sequence at a time (MAX_NUM_SEQS=1)
+            - name: POPE_NPROC
               value: "2"
             - name: VLLM_NEURON_BRANCH
               value: "muse-glimmer-30b"
