@@ -1,6 +1,9 @@
 # Muse-Glimmer-30B in vllm-neuron itself (the in-tree port, on a vllm-neuron branch),
 # on the same container as muse-glimmer-30b-vllm-job.yaml (DLC 0.29.0.1.2.0, SDK 2.33), trn3, TP=2.
 # Same model math, server flags and client as the validated plugin job. Differences:
+#   - the server splits the model's to=self reasoning channel out of the answer (vLLM's
+#     muse_glimmer reasoning parser) and defaults to reasoning strength low (chat template
+#     kwarg), so OpenAI clients such as VLMEvalKit (POPE) get only the final answer.
 #   - the job installs the private vllm-neuron branch over the container's vllm-neuron (editable,
 #     no build isolation). That branch pins vllm==0.32.0 (torch 2.13.0, like 0.29);
 #     the container's Neuron compiler / runtime / libtorch-neuronx-lite stay as shipped.
@@ -93,6 +96,7 @@ spec:
                 --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
                 --num-gpu-blocks-override "$NUM_GPU_BLOCKS" --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
+                --reasoning-parser muse_glimmer --default-chat-template-kwargs '{"reasoning_strength": "low"}' \
                 --additional-config "$ADDITIONAL_CONFIG" > >(tee /tmp/vllm_server.log) 2>&1 &
               SERVER=$!
               for _ in $(seq 1 720); do  # up to 2h for compile
