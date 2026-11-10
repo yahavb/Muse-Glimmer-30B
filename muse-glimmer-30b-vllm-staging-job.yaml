@@ -64,6 +64,7 @@ spec:
               AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
               git -c http.extraHeader="Authorization: Basic $AUTH" clone -q -b "$VLLM_NEURON_BRANCH" "$VLLM_NEURON_REPO" /tmp/vllm-neuron
               unset AUTH GITHUB_TOKEN
+              [ -n "${VLLM_NEURON_REF:-}" ] && git -C /tmp/vllm-neuron checkout -q "$VLLM_NEURON_REF"
               echo "PROVENANCE vllm-neuron: branch $VLLM_NEURON_BRANCH commit $(git -C /tmp/vllm-neuron rev-parse HEAD) — $(git -C /tmp/vllm-neuron log -1 --pretty=%s)"
               python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==" | sed 's/^/PROVENANCE before: /' || true
               # editable install, no build isolation, empty vLLM target device
@@ -110,6 +111,17 @@ spec:
               t_mark "client: text -> image (+cases) -> text -> video -> text+image+video"
               python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
                 --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
+
+              if [ "$RUN_POPE_SUBSET" = "1" ]; then
+                # Quick POPE A/B: fixed subset (seed 0), same request + yes/no rule as VLMEvalKit.
+                t_mark "POPE subset: download TSV"
+                curl -sfL -o /tmp/POPE.tsv https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv
+                t_mark "POPE subset: $POPE_N_POS yes + $POPE_N_NEG adversarial no"
+                echo "════════ POPE SUBSET ════════"
+                python3 scripts/pope_subset.py --url http://127.0.0.1:8000 --model Muse-Glimmer-30B \
+                  --tsv /tmp/POPE.tsv --n-pos "$POPE_N_POS" --n-neg "$POPE_N_NEG" --nproc "$POPE_NPROC" \
+                  || echo "POPE SUBSET FAILED"
+              fi
 
               if [ "$RUN_POPE" = "1" ]; then
                 # Same accuracy benchmark as the vllm-neuron Qwen3-VL model recipe: POPE (5,000 yes/no
@@ -224,7 +236,7 @@ spec:
               value: "512"
             # few buckets -> few NEFFs -> shorter first compile
             - name: ADDITIONAL_CONFIG
-              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 2080]}}'
+              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 1564, 1632, 2080]}}'
             # LNC is chosen by the resource claim template (m-lnc2 -> 2). This only passes that
             # value on: newer vllm-neuron writes its own default (1) when the variable is unset,
             # which overrides the claim and fails the weight load (NRT_RESOURCE).
@@ -236,7 +248,14 @@ spec:
               value: "0"
             # POPE accuracy (as the vllm-neuron Qwen3-VL model recipe: VLMEvalKit @fd3884b, max-tokens 256)
             - name: RUN_POPE
+              value: "0"
+            # quick POPE A/B on a fixed subset (scripts/pope_subset.py)
+            - name: RUN_POPE_SUBSET
               value: "1"
+            - name: POPE_N_POS
+              value: "400"
+            - name: POPE_N_NEG
+              value: "400"
             # parallel requests; the server runs one sequence at a time (MAX_NUM_SEQS=1)
             - name: POPE_NPROC
               value: "2"
@@ -244,6 +263,9 @@ spec:
               value: "100"
             - name: VLLM_NEURON_BRANCH
               value: "muse-glimmer-30b"
+            # optional commit to check out after the clone (empty = branch head)
+            - name: VLLM_NEURON_REF
+              value: ""
             - name: VLLM_NEURON_REPO
               valueFrom:
                 secretKeyRef:
