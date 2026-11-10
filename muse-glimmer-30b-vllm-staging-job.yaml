@@ -115,9 +115,10 @@ spec:
               if [ "$RUN_POPE_SUBSET" = "1" ]; then
                 # Quick POPE A/B: fixed subset (seed 0), same request + yes/no rule as VLMEvalKit.
                 t_mark "POPE subset: download TSV"
-                # python requests (certifi CAs), as VLMEvalKit downloads it; curl fails TLS verification here
-                python3 -c 'import requests, shutil; r = requests.get("https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv", stream=True, timeout=600); r.raise_for_status(); shutil.copyfileobj(r.raw, open("/tmp/POPE.tsv", "wb"))' \
-                  || echo "POPE TSV DOWNLOAD FAILED"
+                # The host's TLS certificate expired (2026-11-10), so TLS is not verified here; the file
+                # is accepted only if its MD5 equals the one VLMEvalKit @fd3884b pins for POPE.
+                curl -skfL -o /tmp/POPE.tsv https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv || echo "POPE TSV DOWNLOAD FAILED"
+                echo "c12f5acb142f2ef1f85a26ba2fbe41d5  /tmp/POPE.tsv" | md5sum -c - || { echo "POPE TSV MD5 MISMATCH"; rm -f /tmp/POPE.tsv; }
                 ls -l /tmp/POPE.tsv || true
                 t_mark "POPE subset: $POPE_N_POS yes + $POPE_N_NEG adversarial no"
                 echo "════════ POPE SUBSET ════════"
