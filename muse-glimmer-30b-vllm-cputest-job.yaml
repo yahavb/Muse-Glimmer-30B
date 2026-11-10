@@ -1,0 +1,69 @@
+# Runs the vllm-neuron Muse-Glimmer unit + tiny E2E tests in CPU mode (no Neuron devices),
+# on the same container as muse-glimmer-30b-vllm-staging-job.yaml, as the CI manifest entries do.
+# Needs secret `vllm-neuron-git` (GITHUB_TOKEN, VLLM_NEURON_REPO).
+#   kubectl delete job muse-glimmer-30b-vllm-cputest --ignore-not-found
+#   kubectl apply -f muse-glimmer-30b-vllm-cputest-job.yaml
+#   kubectl logs job/muse-glimmer-30b-vllm-cputest > /tmp/muse-glimmer-30b-vllm-cputest
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: muse-glimmer-30b-vllm-cputest
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-vllm-cputest
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-ec"
+            - |
+              set -euo pipefail
+              AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+              git -c http.extraHeader="Authorization: Basic $AUTH" clone -q -b "$VLLM_NEURON_BRANCH" "$VLLM_NEURON_REPO" /tmp/vllm-neuron
+              unset AUTH GITHUB_TOKEN
+              echo "PROVENANCE vllm-neuron: commit $(git -C /tmp/vllm-neuron rev-parse HEAD) — $(git -C /tmp/vllm-neuron log -1 --pretty=%s)"
+              VLLM_TARGET_DEVICE=empty python3 -m pip install -q --no-build-isolation \
+                --extra-index-url https://pip.repos.neuron.amazonaws.com -e "/tmp/vllm-neuron[test]" 2>&1 | tail -3
+              python3 -c 'import vllm, transformers, torch; print("PROVENANCE STACK: vllm", vllm.__version__, "transformers", transformers.__version__, "torch", torch.__version__)'
+              cd /tmp/vllm-neuron
+              echo "════════ UNIT ════════"
+              pytest --timeout=1800 -v test/vllm_neuron/model/muse_glimmer/test_shapes_and_hooks.py \
+                test/vllm_neuron/model/muse_glimmer/test_processor_patch.py --tb=short --no-cov 2>&1 | tail -40 || true
+              echo "════════ TINY E2E ════════"
+              pytest --timeout=3600 -v --forked test/vllm_neuron/model/muse_glimmer/tiny/test_tiny_muse_glimmer_e2e.py \
+                --tb=long --no-cov 2>&1 | tail -80 || true
+              echo "════════ TESTS DONE ════════"
+          resources:
+            requests:
+              cpu: 16
+              memory: 64Gi
+            limits:
+              cpu: 32
+              memory: 128Gi
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: VLLM_NEURON_CPU_MODE
+              value: "1"
+            - name: TORCH_DEVICE_BACKEND_AUTOLOAD
+              value: "0"
+            - name: VLLM_NEURON_BRANCH
+              value: "muse-glimmer-30b"
+            - name: VLLM_NEURON_REPO
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: VLLM_NEURON_REPO
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: GITHUB_TOKEN
