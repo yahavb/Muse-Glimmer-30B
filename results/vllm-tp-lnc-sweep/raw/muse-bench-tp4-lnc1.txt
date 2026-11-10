@@ -1,0 +1,6 @@
+(EngineCore pid=537) ERROR 11-10 03:43:48 [core.py:1374] RuntimeError: Worker failed with error 'Computed KV cache budget is below minimum threshold. effective=0.00 GiB, minimum=1.00 GiB.
+(EngineCore pid=537) RuntimeError: Worker failed with error 'Computed KV cache budget is below minimum threshold. effective=0.00 GiB, minimum=1.00 GiB.
+(Worker_TP0 pid=567) (Worker_TP2 pid=569) ERROR 11-10 03:43:48 [multiproc_executor.py:1055] RuntimeError: Computed KV cache budget is below minimum threshold. effective=0.00 GiB, minimum=1.00 GiB.
+(Worker_TP0 pid=567) ERROR 11-10 03:43:48 [multiproc_executor.py:1055] RuntimeError: Computed KV cache budget is below minimum threshold. effective=0.00 GiB, minimum=1.00 GiB.
+(Worker_TP1 pid=568) (Worker_TP2 pid=569) ERROR 11-10 03:43:48 [multiproc_executor.py:1055] RuntimeError: Computed KV cache budget is below minimum threshold. effective=0.00 GiB, minimum=1.00 GiB.
+(Worker_TP3 pid=570) ERROR 11-10 03:43:48 [multiproc_executor.py:1055] RuntimeError: Computed KV cache budget is below minimum threshold. effective=0.00 GiB, minimum=1.00 GiB.

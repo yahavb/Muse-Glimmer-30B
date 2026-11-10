@@ -1,0 +1,66 @@
+════════ BENCH RESULT TP=16 LNC=2 RCT=l-lnc2 ════════
+════════ 1. TEXT (regression) ════════
+(APIServer pid=196) INFO:     127.0.0.1:50852 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:01:17 [loggers.py:310] Engine 000: Avg prompt throughput: 0.2 tokens/s, Avg generation throughput: 13.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.3%, Prefix cache hit rate: 34.6%, MM cache hit rate: 28.6%
+(APIServer pid=196) INFO 11-10 04:01:27 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 6.3%, Prefix cache hit rate: 34.6%, MM cache hit rate: 28.6%
+REQ text-1: prompt_tokens=34 completion_tokens=256 TTFT=0.091s decode=13.7 tok/s e2e=18.67s (13.7 tok/s)
+ANSWER text-1: Quantum computing is just a different way of doing calculations, using the weird rules of quantum physics instead of the rules of normal electronics.
+
+Think of a normal computer first.
+
+**A normal computer uses bits.**
+A bit is like a light switch. It's either ON = 1 or OFF = 0. 
+A bunch of switches together can store information. The code `101` is just three switches.
+
+**A quantum computer uses qubits.**
+A qubit is like a light switch that can be ON, OFF, or both at the same time until you look at it.
+
+That "both at the same time" is called **superposition**. A qubit can be 0, 1, or a mix of 
+════════ 2. IMAGE ════════
+(APIServer pid=196) INFO:     127.0.0.1:43542 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:01:37 [loggers.py:310] Engine 000: Avg prompt throughput: 0.1 tokens/s, Avg generation throughput: 12.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 8.6%, Prefix cache hit rate: 40.8%, MM cache hit rate: 37.5%
+(APIServer pid=196) INFO 11-10 04:01:47 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 12.5%, Prefix cache hit rate: 40.8%, MM cache hit rate: 37.5%
+REQ image-bee: prompt_tokens=289 completion_tokens=256 TTFT=0.208s decode=13.7 tok/s e2e=18.79s (13.6 tok/s)
+ANSWER image-bee: The image is a close-up, slightly out-of-focus garden scene dominated by pink cosmos flowers.
+
+In the center-right of the frame a large, soft pink cosmos with six broad, slightly ruffled petals is in full bloom. A bumblebee, black and yellow/white with a fuzzy thorax, is perched on the flower’s yellow-orange center, its head buried in the florets as it forages. To the left of it another pink cosmos is partially visible, showing its yellow disc and two pink ray petals; behind that a wilted, faded pink bloom and some dry, brown seed heads are visible on thin stems.
+
+In the lower right a small br
+(APIServer pid=196) INFO:     127.0.0.1:37126 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+REQ case-count_red_circles: prompt_tokens=299 completion_tokens=49 TTFT=0.089s decode=13.7 tok/s e2e=3.59s (13.7 tok/s)
+CASE count_red_circles: PASS | expect ['3', 'three'] | answer: '3'
+(APIServer pid=196) INFO:     127.0.0.1:37132 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:01:57 [loggers.py:310] Engine 000: Avg prompt throughput: 1.6 tokens/s, Avg generation throughput: 13.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 8.6%, Prefix cache hit rate: 49.9%, MM cache hit rate: 50.0%
+REQ case-read_word: prompt_tokens=293 completion_tokens=76 TTFT=0.154s decode=13.7 tok/s e2e=5.62s (13.5 tok/s)
+CASE read_word: PASS | expect ['trainium'] | answer: 'The word shown in the image is \n\n**TRAINIUM**\n\nIt is rendered in black, uppercase, sans-serif lettering centered on a light background.'
+(APIServer pid=196) INFO:     127.0.0.1:40976 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+REQ case-main_color: prompt_tokens=299 completion_tokens=39 TTFT=0.154s decode=13.7 tok/s e2e=2.92s (13.3 tok/s)
+CASE main_color: PASS | expect ['green'] | answer: 'green'
+CASES: 3/3 passed
+════════ 3. TEXT after images (hybrid) ════════
+(APIServer pid=196) INFO:     127.0.0.1:40984 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:02:07 [loggers.py:310] Engine 000: Avg prompt throughput: 1.3 tokens/s, Avg generation throughput: 13.5 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.3%, Prefix cache hit rate: 53.8%, MM cache hit rate: 54.5%
+(APIServer pid=196) INFO 11-10 04:02:17 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 5.5%, Prefix cache hit rate: 53.8%, MM cache hit rate: 54.5%
+REQ text-2: prompt_tokens=34 completion_tokens=256 TTFT=0.154s decode=13.7 tok/s e2e=18.73s (13.7 tok/s)
+TEXT REGRESSION: text-2 IDENTICAL to text-1
+════════ 4. VIDEO ════════
+(APIServer pid=196) INFO:     127.0.0.1:53532 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:02:27 [loggers.py:310] Engine 000: Avg prompt throughput: 0.8 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 16.4%, Prefix cache hit rate: 59.5%, MM cache hit rate: 58.3%
+(APIServer pid=196) INFO 11-10 04:02:37 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 19.6%, Prefix cache hit rate: 59.5%, MM cache hit rate: 58.3%
+REQ video-cat: prompt_tokens=584 completion_tokens=256 TTFT=0.121s decode=13.7 tok/s e2e=18.70s (13.7 tok/s)
+CASE video-cat: PASS | expect cat + sunglasses | answer: 'The clip is a short, almost still, close-up of a fluffy cream/white long-haired cat that’s been placed in a bright, tropical seaside setting. The cat is front-and-center, filling most of the frame, and is looking straight into the camera with a calm, slightly stern expression. It’s wearing oversized tortoiseshell sunglasses with dark brown lenses; the lenses reflect a patch of blue sky, clouds and'
+════════ 5. HYBRID: text, image, video ════════
+(APIServer pid=196) INFO:     127.0.0.1:55408 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:02:47 [loggers.py:310] Engine 000: Avg prompt throughput: 0.2 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 3.1%, Prefix cache hit rate: 59.8%, MM cache hit rate: 58.3%
+(APIServer pid=196) INFO 11-10 04:02:57 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 7.0%, Prefix cache hit rate: 59.8%, MM cache hit rate: 58.3%
+REQ text-3: prompt_tokens=34 completion_tokens=256 TTFT=0.087s decode=13.7 tok/s e2e=18.67s (13.7 tok/s)
+(APIServer pid=196) INFO:     127.0.0.1:36734 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:03:07 [loggers.py:310] Engine 000: Avg prompt throughput: 0.1 tokens/s, Avg generation throughput: 12.8 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 10.2%, Prefix cache hit rate: 62.1%, MM cache hit rate: 61.5%
+(APIServer pid=196) INFO 11-10 04:03:17 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 13.3%, Prefix cache hit rate: 62.1%, MM cache hit rate: 61.5%
+REQ image-bee-2: prompt_tokens=289 completion_tokens=256 TTFT=0.212s decode=13.7 tok/s e2e=18.79s (13.6 tok/s)
+(APIServer pid=196) INFO:     127.0.0.1:59000 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=196) INFO 11-10 04:03:27 [loggers.py:310] Engine 000: Avg prompt throughput: 0.8 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 17.2%, Prefix cache hit rate: 66.0%, MM cache hit rate: 64.3%
+(APIServer pid=196) INFO 11-10 04:03:37 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 13.7 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 21.1%, Prefix cache hit rate: 66.0%, MM cache hit rate: 64.3%
+REQ video-cat-2: prompt_tokens=584 completion_tokens=256 TTFT=0.125s decode=13.7 tok/s e2e=18.71s (13.7 tok/s)
+HYBRID text-3 IDENTICAL to text-1 | image-bee-2 IDENTICAL to image-bee | video-cat-2 IDENTICAL to video-cat
+════════ END BENCH RESULT ════════

@@ -1,0 +1,3 @@
+(Worker_TP0 pid=567) ERROR 11-10 03:29:08 [multiproc_executor.py:944] RuntimeError: nrt_tensor_allocate status=4
+(Worker_TP1 pid=568) ERROR 11-10 03:29:08 [multiproc_executor.py:944] RuntimeError: nrt_tensor_allocate status=4
+SERVER EXITED — engine errors:
