@@ -1,5 +1,9 @@
 # Muse-Glimmer-30B on vLLM Neuron (trn3): long-running server for text, image and video.
 # Same settings as the validated job (muse-glimmer-30b-vllm-job.yaml). See docs/DEPLOY_VLLM.md.
+# The model is vllm-neuron's own (vllm_neuron.model.muse_glimmer, on a vllm-neuron branch over
+# the container's vllm-neuron). This repo's plugin runs in in-tree mode (MUSE_GLIMMER_PLUGIN_MODEL=0):
+# it registers no model and only adds the fault injection used by docs/RESILIENCE_VLLM.md.
+# Needs secret `vllm-neuron-git` (GITHUB_TOKEN, VLLM_NEURON_REPO), as the job.
 #
 # vLLM listens on 0.0.0.0:8000 (owner's decision): any pod in the cluster can call it at
 # <pod IP>:8000 or the Service below, without authentication. ClusterIP only: not reachable from outside.
@@ -9,7 +13,7 @@
 #
 # Node cache (hostPath /opt/muse-glimmer-30b): weights and compiled NEFFs survive restarts.
 # NEFF_SOURCE=compile (default) compiles on a cache miss and writes the NEFFs there;
-# NEFF_SOURCE=hostpath refuses to start without NEFFs there (no fail-on-miss flag in 0.29).
+# NEFF_SOURCE=hostpath refuses to start without NEFFs there (it does not stop a compile on a miss).
 # Device health and fault injection: docs/RESILIENCE_VLLM.md.
 apiVersion: apps/v1
 kind: Deployment
@@ -62,7 +66,15 @@ spec:
               set -euo pipefail
               cd /tmp && rm -rf repo && git clone "$REPO_URL" repo && cd repo && git checkout -q "$GIT_REF"
               echo "PROVENANCE commit: $(git rev-parse HEAD)"
-              python3 -m pip install -q --no-deps -e vllm_plugin
+              AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+              rm -rf /tmp/vllm-neuron
+              git -c http.extraHeader="Authorization: Basic $AUTH" clone -q -b "$VLLM_NEURON_BRANCH" "$VLLM_NEURON_REPO" /tmp/vllm-neuron
+              unset AUTH GITHUB_TOKEN
+              [ -n "${VLLM_NEURON_REF:-}" ] && git -C /tmp/vllm-neuron checkout -q "$VLLM_NEURON_REF"
+              echo "PROVENANCE vllm-neuron: $(git -C /tmp/vllm-neuron rev-parse HEAD) — $(git -C /tmp/vllm-neuron log -1 --pretty=%s)"
+              VLLM_TARGET_DEVICE=empty python3 -m pip install -q --no-build-isolation \
+                --extra-index-url https://pip.repos.neuron.amazonaws.com -e /tmp/vllm-neuron 2>&1 | tail -3
+              python3 -m pip install -q --no-deps -e vllm_plugin  # in-tree mode: fault injection only
               # Node cache (hostPath, local disk): HF weights, NEFFs and NKI kernels survive restarts.
               # Native route (libtorch-neuronx-lite): NEFFs in $VLLM_CACHE_ROOT/neuron/native_neff_cache,
               # keyed by graph + versions + compiler args. NKI kernel binaries must live on the node
@@ -97,13 +109,14 @@ spec:
                 *) echo "NEFF_SOURCE must be compile or hostpath"; exit 1 ;;
               esac
               MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
-              exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
+              exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B Muse-Glimmer-30B \
                 --host 0.0.0.0 --port 8000 \
                 --tensor-parallel-size 4 --max-model-len 2048 \
                 --max-num-seqs 1 --max-num-batched-tokens 1024 --num-gpu-blocks-override 512 \
                 --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
-                --additional-config '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 2080]}}'
+                --reasoning-parser muse_glimmer --default-chat-template-kwargs '{"reasoning_strength": "low"}' \
+                --additional-config '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 1564, 1632, 2080]}}'
           ports:
             - name: http
               containerPort: 8000
@@ -153,11 +166,33 @@ spec:
               value: "0"
             - name: VLLM_NEURON_BACKEND
               value: "neuron_native"
+            # LNC comes from the claim (s-lnc2 -> 2). vllm-neuron writes its own default (1)
+            # when the variable is unset, which overrides the claim. Must equal the claim's value.
+            - name: NEURON_LOGICAL_NC_CONFIG
+              value: "2"
+            # the model is vllm-neuron's; the plugin only adds fault injection
+            - name: MUSE_GLIMMER_PLUGIN_MODEL
+              value: "0"
+            - name: VLLM_NEURON_BRANCH
+              value: "muse-glimmer-30b"
+            # optional vllm-neuron commit (empty = branch head)
+            - name: VLLM_NEURON_REF
+              value: ""
+            - name: VLLM_NEURON_REPO
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: VLLM_NEURON_REPO
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: GITHUB_TOKEN
             - name: REPO_URL
               value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
             # pin to a validated commit
             - name: GIT_REF
-              value: "exp/vllm-phase2"
+              value: "main"
             # compile: compile on a miss (NEFFs land on the node cache); hostpath: require cached NEFFs.
             - name: NEFF_SOURCE
               value: "compile"

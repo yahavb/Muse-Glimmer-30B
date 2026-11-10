@@ -10,7 +10,12 @@ Two registrations:
      the same thing vllm-neuron does for its own models.
   2. vllm-neuron's model list (vllm_neuron.model.registry.get_models): the runner sizes the
      encoder cache by looking the class up there (mm_utils); an unlisted model gets 0.
+
+MUSE_GLIMMER_PLUGIN_MODEL=0 (in-tree mode): vllm-neuron ships the model itself
+(vllm_neuron.model.muse_glimmer); the plugin then registers nothing and only installs the
+device fault injection (faults.py, a no-op unless FAULT_INJECTION=1).
 """
+import os
 import logging
 
 ARCH = "MuseGlimmerForConditionalGeneration"
@@ -39,6 +44,11 @@ def _extend_neuron_model_list() -> None:
 
 
 def register() -> None:
+    if os.environ.get("MUSE_GLIMMER_PLUGIN_MODEL", "1") == "0":
+        from . import faults
+
+        faults.install()  # every process loads general plugins, so the workers get it too
+        return
     from vllm import ModelRegistry
 
     log = logging.getLogger("vllm.model_executor.models.registry")

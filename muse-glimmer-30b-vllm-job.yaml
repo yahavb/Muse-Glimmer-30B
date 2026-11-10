@@ -1,9 +1,17 @@
-# Muse-Glimmer-30B served with vLLM Neuron (plugin 0.29.0.1.2.0, SDK 2.33) on trn3, TP=2.
-# Phase 3: text, images (448x448) and video (8 frames, 480x368) — the validated vision graphs. The model comes from this repo's out-of-tree plugin
-# (vllm_plugin/, registered through vllm.general_plugins) — vllm-neuron is unchanged.
+# Muse-Glimmer-30B served by vllm-neuron itself (vllm_neuron.model.muse_glimmer, the in-tree port on a
+# vllm-neuron branch), on DLC 0.29.0.1.2.0 (SDK 2.33), trn3, TP=2. Flow: matmul health check ->
+# clone this repo + the vllm-neuron branch -> install the branch over the container's vllm-neuron
+# (editable, no build isolation; it pins vllm==0.32.0, torch 2.13.0 as in the container; the Neuron
+# compiler / runtime / libtorch-neuronx-lite stay as shipped) -> optional vllm-neuron Muse tests
+# (CPU mode) -> download weights -> vllm serve on 127.0.0.1 -> smoke client (text, image, video) ->
+# optional POPE (full or subset) or latency benchmark -> stop.
+# The server splits the model's to=self reasoning channel out of the answer (vLLM's muse_glimmer
+# reasoning parser) and defaults to reasoning strength low, so OpenAI clients get only the answer.
+# This repo's vllm_plugin/ is not installed (only its test clients are used).
 #
-# Flow: clone repo -> install plugin -> download weights -> vllm serve (bound to 127.0.0.1, so
-# only this pod can reach it) -> smoke client: greedy answer + TTFT / tok/s -> stop.
+# Needs secret `vllm-neuron-git` with keys GITHUB_TOKEN (read access) and VLLM_NEURON_REPO (https URL):
+#   kubectl create secret generic vllm-neuron-git \
+#     --from-literal=GITHUB_TOKEN=<token> --from-literal=VLLM_NEURON_REPO=<https url of the private repo>
 #
 # Launch:
 #   kubectl delete job muse-glimmer-30b-vllm --ignore-not-found
@@ -27,6 +35,21 @@ spec:
       resourceClaims:
         - name: m-lnc2
           resourceClaimTemplateName: m-lnc2
+      # Gate startup on a quick matmul health check of this pod's own chips.
+      initContainers:
+        - name: neuron-healthcheck
+          image: public.ecr.aws/neuron/neuron-observer:0.2.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              ls /dev/neuron*
+              neuron-observer health-check --test matmul
+          env:
+            - name: NEURON_RT_ALLOW_LEGACY_NEFF
+              value: "1"
+          resources:
+            claims:
+              - name: m-lnc2
       containers:
         - name: vllm
           image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
@@ -52,10 +75,29 @@ spec:
               echo "│ subject: $(git log -1 --pretty=%s)"
               echo "└────────────────"
 
-              t_mark "install plugin"
-              python3 -m pip install -q --no-deps -e vllm_plugin
-              python3 -c 'import vllm, vllm_neuron, transformers, torch; from importlib.metadata import entry_points as e; print("PROVENANCE STACK: vllm", vllm.__version__, "torch", torch.__version__, "transformers", transformers.__version__, "| general plugins:", sorted(x.name for x in e(group="vllm.general_plugins")))'
+              t_mark "clone + install vllm-neuron branch"
+              AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+              git -c http.extraHeader="Authorization: Basic $AUTH" clone -q -b "$VLLM_NEURON_BRANCH" "$VLLM_NEURON_REPO" /tmp/vllm-neuron
+              unset AUTH GITHUB_TOKEN
+              [ -n "${VLLM_NEURON_REF:-}" ] && git -C /tmp/vllm-neuron checkout -q "$VLLM_NEURON_REF"
+              echo "PROVENANCE vllm-neuron: branch $VLLM_NEURON_BRANCH commit $(git -C /tmp/vllm-neuron rev-parse HEAD) — $(git -C /tmp/vllm-neuron log -1 --pretty=%s)"
+              python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==" | sed 's/^/PROVENANCE before: /' || true
+              # editable install, no build isolation, empty vLLM target device
+              VLLM_TARGET_DEVICE=empty python3 -m pip install -q --no-build-isolation \
+                --extra-index-url https://pip.repos.neuron.amazonaws.com -e /tmp/vllm-neuron 2>&1 | tail -5
+              python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==|vllm-neuron" | sed 's/^/PROVENANCE after: /' || true
+              python3 -c 'import vllm, vllm_neuron, transformers, torch; from importlib.metadata import entry_points as e; print("PROVENANCE STACK: vllm", vllm.__version__, "torch", torch.__version__, "transformers", transformers.__version__, "| vllm_neuron at", vllm_neuron.__path__[0], "| general plugins:", sorted(x.name for x in e(group="vllm.general_plugins")))'
+              python3 -c 'from vllm_neuron.model.registry import get_models; m = dict(get_models()); c = m["MuseGlimmerForConditionalGeneration"]; print("PROVENANCE in-tree model:", c.__module__)'
               python3 -c 'from transformers import AutoConfig; import transformers.models.muse_glimmer as m; print("PROVENANCE transformers has muse_glimmer:", m.__name__)'
+
+              if [ "$RUN_UNIT_TESTS" = "1" ]; then
+                # vllm-neuron's Muse-Glimmer tests in CPU mode, as its CI manifest runs them
+                t_mark "vllm-neuron Muse-Glimmer tests (CPU mode)"
+                echo "════════ VLLM-NEURON MUSE-GLIMMER TESTS ════════"
+                python3 -m pip install -q pytest pytest-timeout pytest-forked 2>&1 | tail -1 || true
+                ( cd /tmp/vllm-neuron && VLLM_NEURON_CPU_MODE=1 python3 -m pytest --timeout=1800 -q -p no:cacheprovider \
+                    test/vllm_neuron/model/muse_glimmer --forked --tb=line --no-cov 2>&1 | tail -15 ) || echo "UNIT TESTS FAILED"
+              fi
 
               t_mark "model download"
               export HF_HOME=/tmp/hf_cache; mkdir -p "$HF_HOME"
@@ -73,12 +115,13 @@ spec:
 
               t_mark "vllm serve: load + compile + warmup"
               echo "════════ VLLM SERVE (TP=$TP_DEGREE) ════════"
-              vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
+              vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B Muse-Glimmer-30B \
                 --host 127.0.0.1 --port 8000 \
                 --tensor-parallel-size "$TP_DEGREE" --max-model-len "$MAX_MODEL_LEN" \
                 --max-num-seqs "$MAX_NUM_SEQS" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
                 --num-gpu-blocks-override "$NUM_GPU_BLOCKS" --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
+                --reasoning-parser muse_glimmer --default-chat-template-kwargs '{"reasoning_strength": "low"}' \
                 --additional-config "$ADDITIONAL_CONFIG" > >(tee /tmp/vllm_server.log) 2>&1 &
               SERVER=$!
               for _ in $(seq 1 720); do  # up to 2h for compile
@@ -92,6 +135,70 @@ spec:
               t_mark "client: text -> image (+cases) -> text -> video -> text+image+video"
               python3 vllm_plugin/tests/serve_mm_client.py --url http://127.0.0.1:8000 \
                 --model meta-models/Muse-Glimmer-30B --cases eval_images/cases.json --max-tokens 256 || echo "CLIENT FAILED"
+
+              if [ "$RUN_POPE_SUBSET" = "1" ]; then
+                # Quick POPE A/B: fixed subset (seed 0), same request + yes/no rule as VLMEvalKit.
+                t_mark "POPE subset: download TSV"
+                # The host's TLS certificate expired (2026-11-10), so TLS is not verified here; the file
+                # is accepted only if its MD5 equals the one VLMEvalKit @fd3884b pins for POPE.
+                curl -skfL -o /tmp/POPE.tsv https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv || echo "POPE TSV DOWNLOAD FAILED"
+                echo "c12f5acb142f2ef1f85a26ba2fbe41d5  /tmp/POPE.tsv" | md5sum -c - || { echo "POPE TSV MD5 MISMATCH"; rm -f /tmp/POPE.tsv; }
+                ls -l /tmp/POPE.tsv || true
+                t_mark "POPE subset: $POPE_N_POS yes + $POPE_N_NEG adversarial no"
+                echo "════════ POPE SUBSET ════════"
+                python3 scripts/pope_subset.py --url http://127.0.0.1:8000 --model Muse-Glimmer-30B \
+                  --tsv /tmp/POPE.tsv --n-pos "$POPE_N_POS" --n-neg "$POPE_N_NEG" --nproc "$POPE_NPROC" \
+                  || echo "POPE SUBSET FAILED (exit $?)"
+              fi
+
+              if [ "$RUN_POPE" = "1" ]; then
+                # Same accuracy benchmark as the vllm-neuron Qwen3-VL model recipe: POPE (5,000 yes/no
+                # object questions; adversarial / popular / random) with VLMEvalKit @fd3884b over the
+                # OpenAI endpoint, --max-tokens 256, rule-based yes/no scoring (no judge model).
+                # VLMEvalKit lives in its own venv, so the server's torch / vLLM stay untouched.
+                t_mark "POPE: install VLMEvalKit (own venv)"
+                uv venv -q -p 3.12 /tmp/vlmenv
+                git clone -q https://github.com/open-compass/VLMEvalKit.git /tmp/VLMEvalKit
+                git -C /tmp/VLMEvalKit checkout -q fd3884b
+                VIRTUAL_ENV=/tmp/vlmenv uv pip install -q --index-strategy unsafe-best-match \
+                  --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision /tmp/VLMEvalKit 2>&1 | tail -3
+                echo "PROVENANCE VLMEvalKit: $(git -C /tmp/VLMEvalKit rev-parse HEAD)"
+                t_mark "POPE: 5,000 questions"
+                echo "════════ POPE (VLMEvalKit) ════════"
+                POPE_T0=$(date +%s)
+                ( cd /tmp && LMUData=/tmp/LMUData /tmp/vlmenv/bin/python VLMEvalKit/run.py --data POPE \
+                    --model Muse-Glimmer-30B --base-url http://127.0.0.1:8000/v1 --max-tokens 256 \
+                    --judge exact_matching --api-nproc "$POPE_NPROC" --timeout 600 --work-dir /tmp/pope_out \
+                    > /tmp/pope.log 2>&1 ) || echo "POPE FAILED (exit $?)"
+                echo "POPE wall time: $(( $(date +%s) - POPE_T0 )) s"
+                grep -iE "error|traceback|failed to obtain" /tmp/pope.log | sort | uniq -c | sort -rn | head -10 || true
+                for f in $(find /tmp/pope_out -name "*POPE*score*.csv" 2>/dev/null); do echo "── $f"; cat "$f"; done
+                [ -n "$(find /tmp/pope_out -name '*POPE*score*.csv' 2>/dev/null)" ] || tail -40 /tmp/pope.log
+              fi
+              if [ "$RUN_BENCH" = "1" ]; then
+                # Latency/throughput as the vllm-neuron VLM guide (onboarding-vlm-models, step 5):
+                # vllm bench serve with the random-mm dataset (synthetic image + random text).
+                # Shapes kept inside the validated envelope: one 448x448 image (the compiled image
+                # graph, 256 tokens) + 512 random text tokens -> one 1024-token prefill bucket;
+                # 128 output tokens forced (--ignore-eos); one request at a time (MAX_NUM_SEQS=1).
+                BENCH_COMMON="--backend openai-chat --endpoint /v1/chat/completions --base-url http://127.0.0.1:8000 \
+                  --model Muse-Glimmer-30B --tokenizer $MODEL_DIR --num-prompts $BENCH_PROMPTS --max-concurrency 1 \
+                  --ignore-eos --temperature 0 --seed 0 --percentile-metrics ttft,tpot,itl,e2el --metric-percentiles 50,90,99"
+                t_mark "bench: image + text (random-mm, $BENCH_PROMPTS prompts)"
+                echo "════════ BENCH image+text: 1x 448x448 image + 512 text in, 128 out ════════"
+                vllm bench serve $BENCH_COMMON --dataset-name random-mm \
+                  --random-input-len 512 --random-output-len 128 \
+                  --random-mm-base-items-per-request 1 --random-mm-num-mm-items-range-ratio 0.0 \
+                  --random-mm-limit-mm-per-prompt '{"image": 1, "video": 0}' \
+                  --random-mm-bucket-config '{(448, 448, 1): 1.0}' > /tmp/bench_image.log 2>&1 || echo "BENCH image FAILED"
+                tail -45 /tmp/bench_image.log
+                t_mark "bench: text only (random, $BENCH_PROMPTS prompts)"
+                echo "════════ BENCH text only: 512 in, 128 out ════════"
+                vllm bench serve $BENCH_COMMON --dataset-name random \
+                  --random-input-len 512 --random-output-len 128 > /tmp/bench_text.log 2>&1 || echo "BENCH text FAILED"
+                tail -45 /tmp/bench_text.log
+              fi
+
               t_mark ""
               kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
               echo "════════ SERVER LOG (errors / tail) ════════"
@@ -138,7 +245,7 @@ spec:
             - name: REPO_URL
               value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
             - name: BRANCH
-              value: "exp/vllm-phase2"
+              value: "main"
             - name: CPU_CHECK
               value: "0"
             - name: TP_DEGREE
@@ -157,7 +264,49 @@ spec:
               value: "512"
             # few buckets -> few NEFFs -> shorter first compile
             - name: ADDITIONAL_CONFIG
-              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 2080]}}'
+              value: '{"neuron_config": {"num_batched_tokens_buckets": [1024], "num_seqs_buckets": [1]}, "encoder_neuron_config": {"encoder_attention_block_size": 1024, "num_encoder_input_buckets": [1024, 1564, 1632, 2080]}}'
+            # LNC is chosen by the resource claim template (m-lnc2 -> 2). This only passes that
+            # value on: newer vllm-neuron writes its own default (1) when the variable is unset,
+            # which overrides the claim and fails the weight load (NRT_RESOURCE).
+            # Must equal the RCT's logicalNeuronCore; to change LNC, pick a different RCT.
+            - name: NEURON_LOGICAL_NC_CONFIG
+              value: "2"
+            # latency benchmark after the smoke client (vllm bench serve, as the vllm-neuron VLM guide)
+            # vllm-neuron Muse-Glimmer unit + tiny E2E tests (CPU mode) before the server
+            - name: RUN_UNIT_TESTS
+              value: "1"
+            - name: RUN_BENCH
+              value: "0"
+            # POPE accuracy (as the vllm-neuron Qwen3-VL model recipe: VLMEvalKit @fd3884b, max-tokens 256)
+            - name: RUN_POPE
+              value: "0"
+            # quick POPE A/B on a fixed subset (scripts/pope_subset.py)
+            - name: RUN_POPE_SUBSET
+              value: "0"
+            - name: POPE_N_POS
+              value: "400"
+            - name: POPE_N_NEG
+              value: "400"
+            # parallel requests; the server runs one sequence at a time (MAX_NUM_SEQS=1)
+            - name: POPE_NPROC
+              value: "2"
+            - name: BENCH_PROMPTS
+              value: "100"
+            - name: VLLM_NEURON_BRANCH
+              value: "muse-glimmer-30b"
+            # optional commit to check out after the clone (empty = branch head)
+            - name: VLLM_NEURON_REF
+              value: ""
+            - name: VLLM_NEURON_REPO
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: VLLM_NEURON_REPO
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-neuron-git
+                  key: GITHUB_TOKEN
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
