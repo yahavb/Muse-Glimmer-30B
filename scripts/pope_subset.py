@@ -17,6 +17,7 @@ import base64
 import csv
 import io
 import json
+import os
 import random
 import re
 import string
@@ -99,6 +100,9 @@ def main():
                 return r, msg.get("content") or "", out.get("usage", {}).get("completion_tokens", 0)
             except Exception as e:
                 err = e
+                if "Connection refused" in str(e):  # server is gone: stop instead of retrying 800 times
+                    print(f"POPE SUBSET ABORTED: server not reachable ({e})", flush=True)
+                    os._exit(2)
                 time.sleep(5)
         return r, f"ERROR {err}", 0
 

@@ -124,7 +124,7 @@ spec:
                 echo "════════ POPE SUBSET ════════"
                 python3 scripts/pope_subset.py --url http://127.0.0.1:8000 --model Muse-Glimmer-30B \
                   --tsv /tmp/POPE.tsv --n-pos "$POPE_N_POS" --n-neg "$POPE_N_NEG" --nproc "$POPE_NPROC" \
-                  || echo "POPE SUBSET FAILED"
+                  || echo "POPE SUBSET FAILED (exit $?)"
               fi
 
               if [ "$RUN_POPE" = "1" ]; then
