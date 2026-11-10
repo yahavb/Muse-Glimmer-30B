@@ -48,6 +48,9 @@ spec:
             limits:
               cpu: 32
               memory: 128Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
@@ -67,3 +70,8 @@ spec:
                 secretKeyRef:
                   name: vllm-neuron-git
                   key: GITHUB_TOKEN
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
