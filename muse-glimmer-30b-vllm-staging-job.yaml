@@ -115,7 +115,10 @@ spec:
               if [ "$RUN_POPE_SUBSET" = "1" ]; then
                 # Quick POPE A/B: fixed subset (seed 0), same request + yes/no rule as VLMEvalKit.
                 t_mark "POPE subset: download TSV"
-                curl -sfL -o /tmp/POPE.tsv https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv
+                # python requests (certifi CAs), as VLMEvalKit downloads it; curl fails TLS verification here
+                python3 -c 'import requests, shutil; r = requests.get("https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv", stream=True, timeout=600); r.raise_for_status(); shutil.copyfileobj(r.raw, open("/tmp/POPE.tsv", "wb"))' \
+                  || echo "POPE TSV DOWNLOAD FAILED"
+                ls -l /tmp/POPE.tsv || true
                 t_mark "POPE subset: $POPE_N_POS yes + $POPE_N_NEG adversarial no"
                 echo "════════ POPE SUBSET ════════"
                 python3 scripts/pope_subset.py --url http://127.0.0.1:8000 --model Muse-Glimmer-30B \
