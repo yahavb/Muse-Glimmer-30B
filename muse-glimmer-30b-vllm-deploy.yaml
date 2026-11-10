@@ -32,8 +32,24 @@ spec:
         node-type: trn3-dev1
       terminationGracePeriodSeconds: 5  # a hung rank never exits cleanly; don't wait 30 s
       resourceClaims:
-        - name: m-lnc2
-          resourceClaimTemplateName: m-lnc2
+        - name: s-lnc2
+          resourceClaimTemplateName: s-lnc2
+      # Gate startup on a quick matmul health check of this pod's own chips.
+      # Runs in-process, so it sees only the devices allocated by the claim.
+      initContainers:
+        - name: neuron-healthcheck
+          image: public.ecr.aws/neuron/neuron-observer:0.2.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              ls /dev/neuron*
+              neuron-observer health-check --test matmul
+          env:
+            - name: NEURON_RT_ALLOW_LEGACY_NEFF
+              value: "1"
+          resources:
+            claims:
+              - name: s-lnc2
       containers:
         - name: vllm
           image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
@@ -83,7 +99,7 @@ spec:
               MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
               exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B \
                 --host 0.0.0.0 --port 8000 \
-                --tensor-parallel-size 2 --max-model-len 2048 \
+                --tensor-parallel-size 4 --max-model-len 2048 \
                 --max-num-seqs 1 --max-num-batched-tokens 1024 --num-gpu-blocks-override 512 \
                 --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
@@ -100,19 +116,19 @@ spec:
             periodSeconds: 15
           # Device-level health: proof of life from token counters or a 1-token heartbeat
           # (scripts/vllm_health.py). vLLM's /health alone stays green when a rank hangs.
-          # Demo timing: detection within ~10 s of a hang, restart on the first failed probe.
+          # Detection within ~2 min of a hang: proof of life older than 120 s, 3 failed probes in a row.
           livenessProbe:
             exec:
               command: ["python3", "/tmp/repo/scripts/vllm_health.py"]
-            periodSeconds: 5
-            timeoutSeconds: 10
-            failureThreshold: 1
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 3
           resources:
             claims:
-              - name: m-lnc2
+              - name: s-lnc2
             requests:
-              cpu: 22
-              memory: 220Gi
+              cpu: 11
+              memory: 110Gi
               ephemeral-storage: 120Gi
             limits:
               cpu: 44
@@ -146,13 +162,13 @@ spec:
             - name: NEFF_SOURCE
               value: "compile"
             # Health probe (scripts/vllm_health.py) and fault injection (docs/RESILIENCE_VLLM.md).
-            # Fail when the last proof of life is older than HEARTBEAT_S + HEALTH_GRACE_S (8 s).
+            # Fail when the last proof of life is older than HEARTBEAT_S + HEALTH_GRACE_S (120 s).
             - name: HEARTBEAT_S
-              value: "4"
+              value: "60"
             - name: HEALTH_GRACE_S
-              value: "4"
+              value: "60"
             - name: HEARTBEAT_TIMEOUT_S
-              value: "5"
+              value: "20"
             - name: FAULT_INJECTION
               value: "1"
             - name: HF_TOKEN
