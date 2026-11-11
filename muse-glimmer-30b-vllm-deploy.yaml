@@ -36,8 +36,8 @@ spec:
         node-type: trn3-dev1
       terminationGracePeriodSeconds: 5  # a hung rank never exits cleanly; don't wait 30 s
       resourceClaims:
-        - name: s-lnc2
-          resourceClaimTemplateName: s-lnc2
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
       # Gate startup on a quick matmul health check of this pod's own chips.
       # Runs in-process, so it sees only the devices allocated by the claim.
       initContainers:
@@ -53,7 +53,7 @@ spec:
               value: "1"
           resources:
             claims:
-              - name: s-lnc2
+              - name: m-lnc2
       containers:
         - name: vllm
           image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
@@ -113,7 +113,7 @@ spec:
               MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
               exec vllm serve "$MODEL_DIR" --served-model-name meta-models/Muse-Glimmer-30B Muse-Glimmer-30B \
                 --host 0.0.0.0 --port 8000 \
-                --tensor-parallel-size 4 --max-model-len 2048 \
+                --tensor-parallel-size 8 --max-model-len 2048 \
                 --max-num-seqs 1 --max-num-batched-tokens 1024 --num-gpu-blocks-override 512 \
                 --limit-mm-per-prompt '{"image": 1, "video": 1}' \
                 --media-io-kwargs '{"video": {"num_frames": -1}}' \
@@ -140,7 +140,7 @@ spec:
             failureThreshold: 3
           resources:
             claims:
-              - name: s-lnc2
+              - name: m-lnc2
             requests:
               cpu: 11
               memory: 110Gi
@@ -168,7 +168,7 @@ spec:
               value: "0"
             - name: VLLM_NEURON_BACKEND
               value: "neuron_native"
-            # LNC comes from the claim (s-lnc2 -> 2). vllm-neuron writes its own default (1)
+            # LNC comes from the claim (m-lnc2 -> 2). vllm-neuron writes its own default (1)
             # when the variable is unset, which overrides the claim. Must equal the claim's value.
             - name: NEURON_LOGICAL_NC_CONFIG
               value: "2"
