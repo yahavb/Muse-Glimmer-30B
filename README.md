@@ -46,7 +46,7 @@ All rungs answer correctly (known-answer image cases 3/3; image and video descri
 | Neuron PyTorch library | **`torch-neuronx`** (TorchNeuron) 2.14.3.0.1 | **`libtorch-neuronx-lite`** (pulled in by vllm-neuron) |
 | torch | 2.14.0 | 2.13.0 |
 | transformers | 5.20.2 | 5.17.0 |
-| Serving | our scripts (`run_muse_glimmer.py`) | vLLM 0.32.0 + vllm-neuron with the model built in (`vllm_neuron.model.muse_glimmer`); earlier: vLLM 0.29.0 + vllm-neuron 0.29.0.1.2.0 + this repo's `vllm_plugin/` |
+| Serving | our scripts (`run_muse_glimmer.py`) | vLLM 0.32.0 + vllm-neuron with the model as a contrib package (`contrib/models/muse_glimmer`, pip-installed); earlier: vLLM 0.29.0 + vllm-neuron 0.29.0.1.2.0 + this repo's `vllm_plugin/` |
 | Compile | `torch.compile(fullgraph=True, backend="neuron")` | vllm-neuron's `torch.compile` (`fullgraph=True`, `VLLM_NEURON_BACKEND=neuron_native`) |
 | Env | — | `TORCH_DEVICE_BACKEND_AUTOLOAD=0` (keep `torch-neuronx` from loading if present) |
 | SDK | 2.33 | 2.33 |

@@ -1,5 +1,5 @@
-# Muse-Glimmer-30B served by vllm-neuron itself (vllm_neuron.model.muse_glimmer, the in-tree port on a
-# vllm-neuron branch), on DLC 0.29.0.1.2.0 (SDK 2.33), trn3, TP=2. Flow: matmul health check ->
+# Muse-Glimmer-30B on vllm-neuron as a contrib model (contrib/models/muse_glimmer on a vllm-neuron
+# branch, pip-installed so it registers itself), on DLC 0.29.0.1.2.0 (SDK 2.33), trn3, TP=2. Flow: matmul health check ->
 # clone this repo + the vllm-neuron branch -> install the branch over the container's vllm-neuron
 # (editable, no build isolation; it pins vllm==0.32.0, torch 2.13.0 as in the container; the Neuron
 # compiler / runtime / libtorch-neuronx-lite stay as shipped) -> optional vllm-neuron Muse tests
@@ -84,19 +84,21 @@ spec:
               python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==" | sed 's/^/PROVENANCE before: /' || true
               # editable install, no build isolation, empty vLLM target device
               VLLM_TARGET_DEVICE=empty python3 -m pip install -q --no-build-isolation \
-                --extra-index-url https://pip.repos.neuron.amazonaws.com -e /tmp/vllm-neuron 2>&1 | tail -5
+                --extra-index-url https://pip.repos.neuron.amazonaws.com -e "/tmp/vllm-neuron[test]" 2>&1 | tail -5
+              # Muse-Glimmer is a vllm-neuron contrib model: its package registers it in every
+              # vLLM process (vllm.general_plugins entry point).
+              python3 -m pip install -q -e /tmp/vllm-neuron/contrib/models/muse_glimmer 2>&1 | tail -2
               python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|libtorch-neuronx-lite|neuronx-cc|nki|transformers)==|vllm-neuron" | sed 's/^/PROVENANCE after: /' || true
               python3 -c 'import vllm, vllm_neuron, transformers, torch; from importlib.metadata import entry_points as e; print("PROVENANCE STACK: vllm", vllm.__version__, "torch", torch.__version__, "transformers", transformers.__version__, "| vllm_neuron at", vllm_neuron.__path__[0], "| general plugins:", sorted(x.name for x in e(group="vllm.general_plugins")))'
-              python3 -c 'from vllm_neuron.model.registry import get_models; m = dict(get_models()); c = m["MuseGlimmerForConditionalGeneration"]; print("PROVENANCE in-tree model:", c.__module__)'
+              python3 -c 'import muse_glimmer_neuron; muse_glimmer_neuron.register(); from vllm_neuron.model.registry import get_models; print("PROVENANCE contrib model:", dict(get_models())["MuseGlimmerForConditionalGeneration"].__module__)'
               python3 -c 'from transformers import AutoConfig; import transformers.models.muse_glimmer as m; print("PROVENANCE transformers has muse_glimmer:", m.__name__)'
 
               if [ "$RUN_UNIT_TESTS" = "1" ]; then
                 # vllm-neuron's Muse-Glimmer tests in CPU mode, as its CI manifest runs them
                 t_mark "vllm-neuron Muse-Glimmer tests (CPU mode)"
                 echo "════════ VLLM-NEURON MUSE-GLIMMER TESTS ════════"
-                python3 -m pip install -q pytest pytest-timeout pytest-forked 2>&1 | tail -1 || true
                 ( cd /tmp/vllm-neuron && VLLM_NEURON_CPU_MODE=1 python3 -m pytest --timeout=1800 -q -p no:cacheprovider \
-                    test/vllm_neuron/model/muse_glimmer --forked --tb=line --no-cov 2>&1 | tail -15 ) || echo "UNIT TESTS FAILED"
+                    contrib/models/muse_glimmer/test/unit --forked --tb=line --no-cov 2>&1 | tail -15 ) || echo "UNIT TESTS FAILED"
               fi
 
               t_mark "model download"

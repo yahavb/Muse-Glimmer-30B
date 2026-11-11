@@ -1,6 +1,6 @@
 # Muse-Glimmer-30B on vLLM Neuron (trn3): long-running server for text, image and video.
 # Same settings as the validated job (muse-glimmer-30b-vllm-job.yaml). See docs/DEPLOY_VLLM.md.
-# The model is vllm-neuron's own (vllm_neuron.model.muse_glimmer, on a vllm-neuron branch over
+# The model is vllm-neuron's contrib Muse-Glimmer (contrib/models/muse_glimmer, on a vllm-neuron branch over
 # the container's vllm-neuron). This repo's plugin runs in in-tree mode (MUSE_GLIMMER_PLUGIN_MODEL=0):
 # it registers no model and only adds the fault injection used by docs/RESILIENCE_VLLM.md.
 # Needs secret `vllm-neuron-git` (GITHUB_TOKEN, VLLM_NEURON_REPO), as the job.
@@ -74,6 +74,8 @@ spec:
               echo "PROVENANCE vllm-neuron: $(git -C /tmp/vllm-neuron rev-parse HEAD) — $(git -C /tmp/vllm-neuron log -1 --pretty=%s)"
               VLLM_TARGET_DEVICE=empty python3 -m pip install -q --no-build-isolation \
                 --extra-index-url https://pip.repos.neuron.amazonaws.com -e /tmp/vllm-neuron 2>&1 | tail -3
+              # Muse-Glimmer is a vllm-neuron contrib model: its package registers it in every process.
+              python3 -m pip install -q -e /tmp/vllm-neuron/contrib/models/muse_glimmer 2>&1 | tail -2
               python3 -m pip install -q --no-deps -e vllm_plugin  # in-tree mode: fault injection only
               # Node cache (hostPath, local disk): HF weights, NEFFs and NKI kernels survive restarts.
               # Native route (libtorch-neuronx-lite): NEFFs in $VLLM_CACHE_ROOT/neuron/native_neff_cache,
