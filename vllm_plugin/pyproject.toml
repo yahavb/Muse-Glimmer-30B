@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = []  # runs inside a vllm-neuron environment; does not pin vllm/torch
 
 [project.entry-points."vllm.general_plugins"]
-muse_glimmer = "muse_glimmer_vllm:register"
+muse_glimmer_faults = "muse_glimmer_vllm:register"  # not "muse_glimmer": that name is the vllm-neuron contrib package
 
 [tool.setuptools.packages.find]
 include = ["muse_glimmer_vllm", "muse_glimmer_vllm.*"]
