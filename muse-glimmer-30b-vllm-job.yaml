@@ -52,7 +52,7 @@ spec:
               - name: m-lnc2
       containers:
         - name: vllm
-          image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          image: public.ecr.aws/neuron/torch-neuronx:2.14.0-neuronx-py314-sdk2.33.0-ubuntu26.04
           imagePullPolicy: IfNotPresent
           command:
             - /bin/bash
