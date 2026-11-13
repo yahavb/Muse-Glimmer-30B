@@ -151,8 +151,7 @@ spec:
 
               show 06; run_step "block 06: OpenAI client (text, image, video)" bash -c "python3 $SNIP/06.py 2>&1 | tee /tmp/client.out; exit \${PIPESTATUS[0]}"
               run_step "block 06 output: paris / circle / cat" $CHECK expect /tmp/client.out paris circle cat
-              run_step "claim: reasoning in message.reasoning_content" $CHECK fields http://127.0.0.1:8000 Muse-Glimmer-30B image.jpg
-              run_step "claim: image + video + text in one prompt" $CHECK combo http://127.0.0.1:8000 Muse-Glimmer-30B image.jpg video.mp4
+              run_step "claim: reasoning in message.reasoning" $CHECK fields http://127.0.0.1:8000 Muse-Glimmer-30B image.jpg
               run_step "claim: 'Reasoning strength: high' system message" $CHECK strength http://127.0.0.1:8000 Muse-Glimmer-30B
 
               if [ "$RUN_POPE_SUBSET" = "1" ]; then

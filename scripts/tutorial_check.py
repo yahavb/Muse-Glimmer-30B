@@ -81,16 +81,16 @@ def _post(url, body):
 
 
 def fields(url, model, image):
-    # The tutorial says the reasoning is in message.reasoning_content.
+    # The tutorial says the reasoning is in message.reasoning (vLLM 0.29 field name).
     b64 = base64.b64encode(open(image, "rb").read()).decode()
     r = _post(url, {"model": model, "max_tokens": 256, "temperature": 0.0, "messages": [{"role": "user", "content": [
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
         {"type": "text", "text": "Describe this image."}]}]})
     m = r["choices"][0]["message"]
     print("FIELDS message keys with text:", sorted(k for k, v in m.items() if v))
-    print("FIELDS reasoning_content:", repr((m.get("reasoning_content") or "")[:300]))
+    print("FIELDS reasoning:", repr((m.get("reasoning") or "")[:300]))
     print("FIELDS content:", repr((m.get("content") or "")[:300]))
-    return check("reasoning is in message.reasoning_content", bool(m.get("reasoning_content")))
+    return check("reasoning is in message.reasoning", bool(m.get("reasoning")))
 
 
 def combo(url, model, image, video):
