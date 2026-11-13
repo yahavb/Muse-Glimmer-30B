@@ -167,13 +167,13 @@ spec:
               echo "── server log errors:"; grep -iE "error|traceback" /tmp/vllm_server.log | grep -v "INFO" | head -10
               kill "$SERVER"; wait "$SERVER" 2>/dev/null; SERVER=""
               sleep 10
-              echo "── compile cache after the server run (tutorial: ~/.cache/vllm/neuron/compile_cache):"
-              ls -la ~/.cache/vllm/neuron/compile_cache 2>&1 | head -5; du -sh ~/.cache/vllm/neuron/compile_cache 2>&1
+              echo "── compile cache after the server run (the two directories the tutorial names):"
+              run_step "claim: compile cache directories exist" du -sh ~/.cache/neuron_libtorch/neuron/compile_cache ~/.cache/vllm/neuron/torch_compile
 
               # ── Offline inference (same config as the server, so it should load from the cache) ──
               show 07; run_step "block 07: offline LLM (text, image)" bash -c "python3 $SNIP/07.py > /tmp/offline.log 2>&1; rc=\$?; grep -vE '^(INFO|DEBUG|WARNING)|it/s' /tmp/offline.log | tail -12; exit \$rc"
               run_step "block 07 output: paris / circle" bash -c "grep -vE '^(INFO|DEBUG|WARNING|\\(EngineCore)' /tmp/offline.log > /tmp/offline.out; $CHECK expect /tmp/offline.out paris circle"
-              grep -iE "cache hit|loading.*cache|compil" /tmp/offline.log | tail -5
+              run_step "claim: offline engine loads from the cache (init under 120 s)" $CHECK cachehit /tmp/offline.log 120
 
               # ── Integration test ──
               show 09; run_step "block 09: integration test (Trn3)" bash -c "bash $SNIP/09.sh > /tmp/integ.log 2>&1; rc=\$?; grep -E 'PASSED|FAILED|ERROR|passed|failed' /tmp/integ.log | tail -12; exit \$rc"

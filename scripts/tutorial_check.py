@@ -127,6 +127,14 @@ def strength(url, model):
                  lens["high"] > lens["default"], str(lens))
 
 
+def cachehit(log, limit):
+    # The tutorial says a later run with the same configuration loads from the
+    # compile cache. vLLM logs "init engine (...) took N s (compilation: M s)".
+    took = [float(m.group(1)) for m in re.finditer(r"init engine .*? took ([0-9.]+) s", open(log).read())]
+    print("CACHEHIT init engine times (s):", took)
+    return check(f"engine init under {limit} s (cache used)", bool(took) and took[-1] < float(limit))
+
+
 if __name__ == "__main__":
     cmd, args = sys.argv[1], sys.argv[2:]
     if cmd == "extract":
@@ -135,6 +143,8 @@ if __name__ == "__main__":
         sys.exit(0 if expect(args[0], args[1:]) else 1)
     elif cmd == "fields":
         sys.exit(0 if fields(*args) else 1)
+    elif cmd == "cachehit":
+        sys.exit(0 if cachehit(*args) else 1)
     elif cmd == "combo":
         sys.exit(0 if combo(*args) else 1)
     elif cmd == "strength":
