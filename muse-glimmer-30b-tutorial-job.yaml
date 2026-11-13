@@ -139,7 +139,12 @@ spec:
                 record "block 05: vllm serve -> healthy (first start, includes compile)" 0 "$(( $(date +%s) - T_SERVE ))"
               else
                 record "block 05: vllm serve" 1 "$(( $(date +%s) - T_SERVE ))"
-                grep -nE "ERROR|Error|Traceback" /tmp/vllm_server.log | head -40; tail -30 /tmp/vllm_server.log
+                # root cause: the first traceback in full (parallel trace lanes log theirs first)
+                echo "── server log: first traceback"
+                awk '/Traceback/{f=1} f{print; if (++n>=140) exit}' /tmp/vllm_server.log | grep -vE '^\S*\s*[~^ ]+$' | cut -c1-400
+                echo "── server log: lane / compiler errors"
+                grep -nE "lane|err=|neuronx-cc|ERROR [^M]|Error:|Exception:" /tmp/vllm_server.log | grep -v "multiproc_executor.py:1055" | cut -c1-400 | head -40
+                echo "── server log: tail"; tail -15 /tmp/vllm_server.log | cut -c1-400
                 abort "server did not come up"
               fi
               grep -iE "compil|warmup|NEFF" /tmp/vllm_server.log | tail -5
