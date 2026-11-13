@@ -1,0 +1,217 @@
+# Validates the vLLM Neuron tutorial "Deploy Muse-Glimmer-30B with vLLM Neuron"
+# (aws-neuron-sdk: vllm-neuron/docs/tutorials/tutorial-muse-glimmer-30b.md) on trn3, TP=2,
+# on the DLC the tutorial names, as shipped. The job clones the docs branch and runs the
+# tutorial's own code blocks in order (scripts/tutorial_check.py pulls them out of the file),
+# so what runs is exactly what is published. A reader runs blocks 3 onward from the vLLM Neuron
+# clone; so does this job. Substitutions: /path/to/ -> /tmp/models/, the
+# HF token placeholder -> this job's secret, and `--host 127.0.0.1` on `vllm serve` so the
+# server is reachable only inside this pod. Order: blocks 1-3, 8, 10 (CPU unit tests),
+# 4 (download), 5 (serve), 6 (client), extra checks on tutorial claims, POPE subset,
+# stop server, 7 (offline), 9 (integration test). Ends with a PASS/FAIL table.
+#
+# Needs secret `hf-token` (key HF_TOKEN). This repo and the docs fork are public.
+#
+# Launch:
+#   kubectl delete job muse-glimmer-30b-tutorial --ignore-not-found
+#   kubectl apply -f muse-glimmer-30b-tutorial-job.yaml
+#   kubectl logs -f job/muse-glimmer-30b-tutorial > /tmp/muse-glimmer-30b-tutorial
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: muse-glimmer-30b-tutorial
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-tutorial
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-type: trn3-dev1
+      resourceClaims:
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
+      # Gate startup on a quick matmul health check of this pod's own chips.
+      initContainers:
+        - name: neuron-healthcheck
+          image: public.ecr.aws/neuron/neuron-observer:0.2.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              ls /dev/neuron*
+              neuron-observer health-check --test matmul
+          env:
+            - name: NEURON_RT_ALLOW_LEGACY_NEFF
+              value: "1"
+          resources:
+            claims:
+              - name: m-lnc2
+      containers:
+        - name: tutorial
+          image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-c"
+            - |
+              set -uo pipefail
+              JOB_T0=$(date +%s); SUMMARY=/tmp/summary.tsv; : > "$SUMMARY"; GIT_SHA=?; DOCS_SHA=?; SERVER=""
+              # record NAME RC SECONDS
+              record() { printf '%s\t%s\t%s\n' "$([ "$2" = 0 ] && echo PASS || echo FAIL)" "$3" "$1" >> "$SUMMARY"; }
+              # run_step NAME CMD...: run, time, record; never stops the job
+              run_step() {
+                local name="$1"; shift; local t0=$(date +%s)
+                echo; echo "════════ $name ════════"
+                "$@"; local rc=$?
+                record "$name" "$rc" "$(( $(date +%s) - t0 ))"
+                [ "$rc" = 0 ] || echo "STEP FAILED (rc $rc): $name"
+                return "$rc"
+              }
+              show() { echo "── tutorial block $1, as published:"; cat "$SNIP/$1.orig"; echo "──"; }
+              finish() {
+                [ -n "${SERVER:-}" ] && { kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null; }
+                echo; echo "════════ SUMMARY (result, seconds, step) ════════"; cat "$SUMMARY"
+                echo "total: $(( $(date +%s) - JOB_T0 )) s"
+                grep -q '^FAIL' "$SUMMARY" && echo "TUTORIAL CHECK: FAILED" || echo "TUTORIAL CHECK: ALL PASSED"
+                echo "════════ RUN DONE ($GIT_SHA / docs $DOCS_SHA) ════════"
+              }
+              abort() { echo "ABORT: $1"; finish; exit 1; }
+
+              cd /tmp
+              git clone -q -b "$BRANCH" "$REPO_URL" /tmp/repo || abort "clone $REPO_URL"
+              git clone -q --depth 1 -b "$DOCS_BRANCH" "$DOCS_REPO" /tmp/docs || abort "clone $DOCS_REPO"
+              GIT_SHA=$(git -C /tmp/repo rev-parse HEAD); DOCS_SHA=$(git -C /tmp/docs rev-parse HEAD)
+              echo "┌── PROVENANCE ──"
+              echo "│ checker: $REPO_URL $BRANCH $GIT_SHA — $(git -C /tmp/repo log -1 --pretty=%s)"
+              echo "│ docs   : $DOCS_REPO $DOCS_BRANCH $DOCS_SHA — $(git -C /tmp/docs log -1 --pretty=%s)"
+              echo "│ image  : pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04"
+              echo "└────────────────"
+              CHECK="python3 /tmp/repo/scripts/tutorial_check.py"
+              export SNIP=/tmp/snip MODELS_ROOT=/tmp/models HF_HOME=/tmp/hf_cache
+              mkdir -p "$MODELS_ROOT" "$HF_HOME"
+              $CHECK extract /tmp/docs/vllm-neuron/docs/tutorials/tutorial-muse-glimmer-30b.md "$SNIP" || abort "extract"
+
+              # ── Step 1-2: environment (block 2 is sourced so its exports stay) ──
+              show 01; run_step "block 01: neuron-ls" bash "$SNIP/01.sh"
+              show 02; source "$SNIP/02.sh"; record "block 02: env exports" $? 0
+              echo "NEURON_LOGICAL_NC_CONFIG=$NEURON_LOGICAL_NC_CONFIG HF_TOKEN set: $([ -n "$HF_TOKEN" ] && echo yes)"
+
+              # ── Step 2: install. The block ends in the clone; later blocks run from there. ──
+              show 03; t0=$(date +%s); bash "$SNIP/03.sh" > /tmp/install.log 2>&1; rc=$?; tail -5 /tmp/install.log
+              cd /tmp/vllm-neuron || abort "no /tmp/vllm-neuron after block 03"
+              record "block 03: clone vllm-neuron + pip install contrib" "$rc" "$(( $(date +%s) - t0 ))"
+              [ "$rc" = 0 ] || abort "install failed"
+              echo "PROVENANCE vllm-neuron main: $(git rev-parse HEAD) — $(git log -1 --pretty=%s)"
+              python3 -m pip freeze 2>/dev/null | grep -iE "^(vllm|vllm.neuron|torch|transformers|huggingface.hub|openai|muse.glimmer.neuron)==|muse" | sed 's/^/PROVENANCE pip: /'
+              python3 -c 'import sys, vllm; from importlib.metadata import entry_points as e; print("PROVENANCE python", sys.version.split()[0], "| vllm", vllm.__version__, "| general plugins:", sorted(x.name for x in e(group="vllm.general_plugins")))'
+
+              # ── Test tools + CPU unit tests (no devices needed; run before the server) ──
+              show 08; run_step "block 08: pip install test tools" bash -c "bash $SNIP/08.sh 2>&1 | tail -3; exit \${PIPESTATUS[0]}"
+              show 10; run_step "block 10: unit tests (CPU mode)" bash -c "bash $SNIP/10.sh > /tmp/unit.log 2>&1; rc=\$?; tail -25 /tmp/unit.log; exit \$rc"
+
+              # ── Step 3: download ──
+              show 04; run_step "block 04: hf download" bash -c "bash $SNIP/04.sh > /tmp/download.log 2>&1; rc=\$?; tail -5 /tmp/download.log; exit \$rc" || abort "download failed"
+              du -sh "$MODELS_ROOT/Muse-Glimmer-30B"
+              # claim: the chat template defaults to reasoning strength high
+              echo "── chat template lines with reasoning_strength:"
+              grep -rhn "reasoning_strength" "$MODELS_ROOT/Muse-Glimmer-30B"/*.jinja "$MODELS_ROOT/Muse-Glimmer-30B"/tokenizer_config.json 2>/dev/null | cut -c1-300 | head -12
+
+              # inputs the client and offline blocks read from the current directory
+              python3 -c 'from PIL import Image; Image.open("/tmp/repo/eval_images/shapes.png").convert("RGB").save("image.jpg", quality=95)'
+              cp /tmp/repo/media/cat_sunglasses.mp4 video.mp4
+              ls -l image.jpg video.mp4
+
+              # ── Step 4: online serving ──
+              show 05
+              sed -i '1s| \\$| --host 127.0.0.1 \\|' "$SNIP/05.sh"; head -1 "$SNIP/05.sh"
+              T_SERVE=$(date +%s)
+              bash "$SNIP/05.sh" > /tmp/vllm_server.log 2>&1 &
+              SERVER=$!
+              echo "════════ block 05: vllm serve (waiting for /health, up to 2 h) ════════"
+              for _ in $(seq 1 720); do
+                curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1 && break
+                kill -0 "$SERVER" 2>/dev/null || break
+                sleep 10
+              done
+              if curl -sf http://127.0.0.1:8000/health >/dev/null; then
+                record "block 05: vllm serve -> healthy (first start, includes compile)" 0 "$(( $(date +%s) - T_SERVE ))"
+              else
+                record "block 05: vllm serve" 1 "$(( $(date +%s) - T_SERVE ))"
+                grep -nE "ERROR|Error|Traceback" /tmp/vllm_server.log | head -40; tail -30 /tmp/vllm_server.log
+                abort "server did not come up"
+              fi
+              grep -iE "compil|warmup|NEFF" /tmp/vllm_server.log | tail -5
+
+              show 06; run_step "block 06: OpenAI client (text, image, video)" bash -c "python3 $SNIP/06.py 2>&1 | tee /tmp/client.out; exit \${PIPESTATUS[0]}"
+              run_step "block 06 output: paris / circle / cat" $CHECK expect /tmp/client.out paris circle cat
+              run_step "claim: reasoning in message.reasoning_content" $CHECK fields http://127.0.0.1:8000 Muse-Glimmer-30B image.jpg
+              run_step "claim: image + video + text in one prompt" $CHECK combo http://127.0.0.1:8000 Muse-Glimmer-30B image.jpg video.mp4
+              run_step "claim: 'Reasoning strength: high' system message" $CHECK strength http://127.0.0.1:8000 Muse-Glimmer-30B
+
+              if [ "$RUN_POPE_SUBSET" = "1" ]; then
+                # Re-measure the Accuracy table. The POPE TSV host's TLS certificate expired
+                # (2026-11-10); the file is accepted only if its MD5 equals the one VLMEvalKit
+                # @fd3884b pins for POPE.
+                curl -skfL -o /tmp/POPE.tsv https://opencompass.openxlab.space/utils/VLMEval/POPE.tsv || echo "POPE TSV DOWNLOAD FAILED"
+                echo "c12f5acb142f2ef1f85a26ba2fbe41d5  /tmp/POPE.tsv" | md5sum -c - || rm -f /tmp/POPE.tsv
+                run_step "accuracy: POPE subset 400 yes + 400 adversarial no (tutorial: F1 85.99)" bash -c \
+                  "python3 /tmp/repo/scripts/pope_subset.py --url http://127.0.0.1:8000 --model Muse-Glimmer-30B --tsv /tmp/POPE.tsv --n-pos 400 --n-neg 400 --nproc 2 > /tmp/pope.log 2>&1; rc=\$?; grep -E 'POPE subset:|RESULT|unparsed|empty|ABORT' /tmp/pope.log; exit \$rc"
+              fi
+
+              echo "── server log errors:"; grep -iE "error|traceback" /tmp/vllm_server.log | grep -v "INFO" | head -10
+              kill "$SERVER"; wait "$SERVER" 2>/dev/null; SERVER=""
+              sleep 10
+              echo "── compile cache after the server run (tutorial: ~/.cache/vllm/neuron/compile_cache):"
+              ls -la ~/.cache/vllm/neuron/compile_cache 2>&1 | head -5; du -sh ~/.cache/vllm/neuron/compile_cache 2>&1
+
+              # ── Offline inference (same config as the server, so it should load from the cache) ──
+              show 07; run_step "block 07: offline LLM (text, image)" bash -c "python3 $SNIP/07.py > /tmp/offline.log 2>&1; rc=\$?; grep -vE '^(INFO|DEBUG|WARNING)|it/s' /tmp/offline.log | tail -12; exit \$rc"
+              run_step "block 07 output: paris / circle" bash -c "grep -vE '^(INFO|DEBUG|WARNING|\\(EngineCore)' /tmp/offline.log > /tmp/offline.out; $CHECK expect /tmp/offline.out paris circle"
+              grep -iE "cache hit|loading.*cache|compil" /tmp/offline.log | tail -5
+
+              # ── Integration test ──
+              show 09; run_step "block 09: integration test (Trn3)" bash -c "bash $SNIP/09.sh > /tmp/integ.log 2>&1; rc=\$?; grep -E 'PASSED|FAILED|ERROR|passed|failed' /tmp/integ.log | tail -12; exit \$rc"
+
+              finish
+          resources:
+            claims:
+              - name: m-lnc2
+            requests:
+              cpu: 22
+              memory: 220Gi
+              ephemeral-storage: 120Gi
+            limits:
+              cpu: 44
+              memory: 400Gi
+              ephemeral-storage: 200Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # Only what the tutorial sets (NEURON_LOGICAL_NC_CONFIG, HF_TOKEN) comes from its
+            # blocks; nothing else Neuron-specific is set here, so a reader's shell matches.
+            - name: REPO_URL
+              value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
+            - name: BRANCH
+              value: "main"
+            - name: DOCS_REPO
+              value: "https://github.com/yahavb/aws-neuron-sdk.git"
+            - name: DOCS_BRANCH
+              value: "yahavb/muse-glimmer-30b-tutorial"
+            # re-measure the Accuracy table (800 questions, one sequence at a time)
+            - name: RUN_POPE_SUBSET
+              value: "1"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
