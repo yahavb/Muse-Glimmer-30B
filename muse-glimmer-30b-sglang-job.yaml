@@ -116,7 +116,10 @@ spec:
               t_mark "client: text (known answers, greedy repeat)"
               echo "════════ TEXT CLIENT ════════"
               python3 scripts/sglang_text_client.py --url http://127.0.0.1:30000 --model Muse-Glimmer-30B \
-                --max-tokens 256 || echo "CLIENT FAILED"
+                --max-tokens 256 --runs "$CLIENT_RUNS" --label sglang --dump /tmp/answers_sglang.json || echo "CLIENT FAILED"
+              python3 -c 'import json; print("ANSWERS_JSON", json.dumps(json.load(open("/tmp/answers_sglang.json"))))' || true
+              # stay up for profiling with kubectl exec (KEEP_ALIVE_S seconds), the server still running
+              [ "${KEEP_ALIVE_S:-0}" -gt 0 ] && { echo "KEEP ALIVE ${KEEP_ALIVE_S}s"; sleep "$KEEP_ALIVE_S"; } || true
 
               t_mark ""
               kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
@@ -169,8 +172,13 @@ spec:
             - name: TP_DEGREE
               value: "8"
             # one request at a time, as the vLLM deploy; text prompts are short
+            # 2048 as the vLLM deploy's --max-model-len (A/B with muse-glimmer-30b-vllm-text-job.yaml)
             - name: CONTEXT_LENGTH
-              value: "4096"
+              value: "2048"
+            - name: CLIENT_RUNS
+              value: "4"
+            - name: KEEP_ALIVE_S
+              value: "3600"
             - name: CHUNK
               value: "1024"
             - name: MAX_RUNNING
