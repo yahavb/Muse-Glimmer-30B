@@ -1,0 +1,185 @@
+# Muse-Glimmer-30B on SGLang (sglang-neuron plugin), TEXT ONLY, trn3, TP=8 on m-lnc2 (LNC2), as the vLLM job.
+# sglang-neuron's graphs take token ids only (no image/video embeddings), so the server runs with
+# --language-model-only and SGLang refuses media input. Muse-Glimmer is a new model package on a fork of
+# sgl-project/sglang-neuron (sglang_neuron/models/muse_glimmer: plain-PyTorch decoder, the same math as the
+# validated vLLM Neuron port), installed over the image's plugin (editable, no deps).
+# Flow: matmul health check -> clone this repo + the sglang-neuron branch -> install the branch -> download
+# weights -> sglang.launch_server on 127.0.0.1 (compile + warm every graph) -> text client -> stop.
+#
+# Launch:
+#   kubectl delete job muse-glimmer-30b-sglang --ignore-not-found
+#   kubectl apply -f muse-glimmer-30b-sglang-job.yaml
+#   kubectl logs -f job/muse-glimmer-30b-sglang > /tmp/muse-glimmer-30b-sglang
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: muse-glimmer-30b-sglang
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: muse-glimmer-30b-sglang
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-type: trn3-dev1
+      resourceClaims:
+        - name: m-lnc2
+          resourceClaimTemplateName: m-lnc2
+      initContainers:
+        - name: neuron-healthcheck
+          image: public.ecr.aws/neuron/neuron-observer:0.2.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              ls /dev/neuron*
+              neuron-observer health-check --test matmul
+          env:
+            - name: NEURON_RT_ALLOW_LEGACY_NEFF
+              value: "1"
+          resources:
+            claims:
+              - name: m-lnc2
+      containers:
+        - name: sglang
+          image: public.ecr.aws/neuron/pytorch-inference-sglang-neuron:v0.1.0-neuron-py314-sdk-2.33.0-ubuntu26.04
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - "-ec"
+            - |
+              [ -f /opt/neuron-top-patch/neuron-monitor-top.py ] && install -m 755 /opt/neuron-top-patch/neuron-monitor-top.py "$(command -v neuron-monitor-top.py || echo /opt/aws/neuron/bin/neuron-monitor-top.py)" 2>/dev/null && echo "neuron-top: patched (preview)" || true   # neuron-top-patch: temporary, remove when the updated neuron-top ships in the Neuron SDK
+              set -euo pipefail
+              JOB_T0=$(date +%s); export STEP_TIMES=/tmp/step_times.tsv; : > "$STEP_TIMES"
+              t_mark() {
+                local now; now=$(date +%s)
+                [ -n "${T_NAME:-}" ] && printf '%s\t%s\n' "$((now - T_START))" "$T_NAME" >> "$STEP_TIMES"
+                T_NAME="$1"; T_START=$now
+              }
+              t_mark "git clone"
+              cd /tmp && git clone -q -b "$BRANCH" "$REPO_URL" repo && cd repo
+              GIT_SHA=$(git rev-parse HEAD)
+              echo "┌── PROVENANCE ──"
+              echo "│ repo   : $REPO_URL  branch: $(git rev-parse --abbrev-ref HEAD) (requested $BRANCH)"
+              echo "│ commit : $GIT_SHA"
+              echo "│ subject: $(git log -1 --pretty=%s)"
+              echo "└────────────────"
+
+              t_mark "clone + install sglang-neuron branch"
+              git clone -q -b "$SGLANG_NEURON_BRANCH" "$SGLANG_NEURON_REPO" /tmp/sglang-neuron
+              [ -n "${SGLANG_NEURON_REF:-}" ] && git -C /tmp/sglang-neuron checkout -q "$SGLANG_NEURON_REF"
+              echo "PROVENANCE sglang-neuron: $SGLANG_NEURON_REPO branch $SGLANG_NEURON_BRANCH commit $(git -C /tmp/sglang-neuron rev-parse HEAD) — $(git -C /tmp/sglang-neuron log -1 --pretty=%s)"
+              python3 -c 'import importlib.metadata as m; print("PROVENANCE before:", {p: m.version(p) for p in ("sglang", "sglang-neuron", "torch", "torch-neuronx", "neuronx-cc", "transformers")})' || true
+              # the plugin's code only: the image's SGLang, torch and Neuron SDK stay as shipped
+              python3 -m pip install -q --no-deps --no-build-isolation -e /tmp/sglang-neuron 2>&1 | tail -3
+              python3 -c 'import importlib.metadata as m, sglang_neuron, sglang; print("PROVENANCE after:", {p: m.version(p) for p in ("sglang", "sglang-neuron", "torch", "torch-neuronx", "transformers")}, "| sglang_neuron at", sglang_neuron.__path__[0], "| sglang at", sglang.__path__[0])'
+              python3 -c 'from sglang_neuron.models.catalog import MODELS; print("PROVENANCE catalog has Muse-Glimmer:", MODELS["MuseGlimmerForConditionalGeneration"].package)'
+
+              t_mark "model download"
+              export HF_HOME=/tmp/hf_cache; mkdir -p "$HF_HOME"
+              MODEL_DIR=$(python3 -c 'from huggingface_hub import snapshot_download; print(snapshot_download("meta-models/Muse-Glimmer-30B"))')
+              echo "MODEL_DIR=$MODEL_DIR"
+              python3 - "$MODEL_DIR" <<'PY'
+              import json, sys
+              c = json.load(open(f"{sys.argv[1]}/config.json")); t = c.get("text_config", c)
+              keys = ("num_hidden_layers", "hidden_size", "num_attention_heads", "num_key_value_heads", "head_dim",
+                      "sliding_window", "qk_scale_factor", "final_logit_softcapping", "output_multiplier", "rms_norm_eps",
+                      "post_norm_eps", "rope_parameters", "tie_word_embeddings", "dtype", "torch_dtype")
+              print("CHECKPOINT", c.get("architectures"), {k: t.get(k, c.get(k)) for k in keys})
+              print("CHECKPOINT layer_types", t.get("layer_types", [])[:4], "layer_rope_theta", t.get("layer_rope_theta", [])[:4])
+              PY
+
+              t_mark "sglang serve: load + compile + warmup"
+              echo "════════ SGLANG SERVE (TP=$TP_DEGREE, text only) ════════"
+              export TORCH_NEURONX_NEFF_CACHE_DIR=/tmp/cache/neff TORCH_NEURONX_HLO_CACHE_DIR=/tmp/cache/hlo \
+                NKI_COMPILE_CACHE_URL=/tmp/cache/nki
+              python3 -m sglang.launch_server --model-path "$MODEL_DIR" --served-model-name Muse-Glimmer-30B \
+                --language-model-only --host 127.0.0.1 --port 30000 \
+                --tp-size "$TP_DEGREE" --context-length "$CONTEXT_LENGTH" --chunked-prefill-size "$CHUNK" \
+                --max-running-requests "$MAX_RUNNING" --mem-fraction-static "$MEM_FRACTION" \
+                --reasoning-parser muse --default-chat-template-kwargs '{"reasoning_strength": "low"}' \
+                > >(tee /tmp/sglang_server.log) 2>&1 &
+              SERVER=$!
+              for _ in $(seq 1 720); do  # up to 2h for compile
+                curl -sf http://127.0.0.1:30000/health >/dev/null 2>&1 && break
+                kill -0 "$SERVER" 2>/dev/null || { echo "SERVER EXITED — first traceback:"; grep -n -m1 -A40 "Traceback" /tmp/sglang_server.log || grep -nE "ERROR|Error" /tmp/sglang_server.log | head -60; exit 1; }
+                sleep 10
+              done
+              curl -sf http://127.0.0.1:30000/health >/dev/null || { echo "SERVER NOT READY"; grep -nE "ERROR|Error" /tmp/sglang_server.log | head -60; exit 1; }
+              echo "server ready"; grep -iE "Muse-Glimmer|warm|KV pool|compil|fired up" /tmp/sglang_server.log | tail -20 || true
+
+              t_mark "client: text (known answers, greedy repeat)"
+              echo "════════ TEXT CLIENT ════════"
+              python3 scripts/sglang_text_client.py --url http://127.0.0.1:30000 --model Muse-Glimmer-30B \
+                --max-tokens 256 || echo "CLIENT FAILED"
+
+              t_mark ""
+              kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true
+              echo "════════ SERVER LOG (errors / tail) ════════"
+              grep -iE "error|traceback|exception" /tmp/sglang_server.log | head -20 || true
+              tail -20 /tmp/sglang_server.log
+              echo "════════ E2E TIMING ════════"
+              python3 scripts/print_step_times.py "$STEP_TIMES" "$(( $(date +%s) - JOB_T0 ))"
+              echo "════════ RUN DONE ($GIT_SHA) ════════"
+          securityContext:
+            capabilities:
+              add: ["SYS_NICE"]   # the container guide's --cap-add SYS_NICE (NUMA memory placement)
+          resources:
+            claims:
+              - name: m-lnc2
+            requests:
+              cpu: 22
+              memory: 220Gi
+              ephemeral-storage: 120Gi
+            limits:
+              cpu: 44
+              memory: 400Gi
+              ephemeral-storage: 200Gi
+          volumeMounts:
+            - {name: neuron-top-patch, mountPath: /opt/neuron-top-patch, readOnly: true}   # neuron-top-patch
+            - name: dshm
+              mountPath: /dev/shm
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: SGLANG_PLATFORM
+              value: "neuron"
+            # LNC comes from the m-lnc2 claim (2); the catalog's logical_nc for this model is 2 as well
+            - name: NEURON_LOGICAL_NC_CONFIG
+              value: "2"
+            - name: REPO_URL
+              value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
+            - name: BRANCH
+              value: "main"
+            - name: SGLANG_NEURON_REPO
+              value: "https://github.com/yahavb/sglang-neuron.git"
+            - name: SGLANG_NEURON_BRANCH
+              value: "muse-glimmer-text"
+            # optional commit to check out after the clone (empty = branch head)
+            - name: SGLANG_NEURON_REF
+              value: ""
+            - name: TP_DEGREE
+              value: "8"
+            # one request at a time, as the vLLM deploy; text prompts are short
+            - name: CONTEXT_LENGTH
+              value: "4096"
+            - name: CHUNK
+              value: "1024"
+            - name: MAX_RUNNING
+              value: "1"
+            - name: MEM_FRACTION
+              value: "0.6"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+      volumes:
+        - name: neuron-top-patch   # neuron-top-patch: temporary, remove when the updated neuron-top ships in the Neuron SDK
+          configMap: {name: neuron-top-patch, optional: true}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
