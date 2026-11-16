@@ -1,4 +1,4 @@
-# Muse-Glimmer-30B on SGLang (sglang-neuron plugin), TEXT ONLY, trn3, TP=8 on m-lnc2 (LNC2), as the vLLM job.
+# Muse-Glimmer-30B on SGLang (sglang-neuron plugin), TEXT ONLY, trn2, TP=8 on m-lnc2 (2 devices, LNC2).
 # sglang-neuron's graphs take token ids only (no image/video embeddings), so the server runs with
 # --language-model-only and SGLang refuses media input. Muse-Glimmer is a new model package on a fork of
 # sgl-project/sglang-neuron (sglang_neuron/models/muse_glimmer: plain-PyTorch decoder, the same math as the
@@ -24,7 +24,7 @@ spec:
     spec:
       restartPolicy: Never
       nodeSelector:
-        node-type: trn3-dev1
+        node-type: trn2
       resourceClaims:
         - name: m-lnc2
           resourceClaimTemplateName: m-lnc2
@@ -146,6 +146,9 @@ spec:
               value: "1"
             - name: SGLANG_PLATFORM
               value: "neuron"
+            # the trn2 node (.218) fails its EFA affinity check without this (no EFA used here)
+            - name: NEURON_SKIP_EFA_AFFINITY
+              value: "1"
             # LNC comes from the m-lnc2 claim (2); the catalog's logical_nc for this model is 2 as well
             - name: NEURON_LOGICAL_NC_CONFIG
               value: "2"
