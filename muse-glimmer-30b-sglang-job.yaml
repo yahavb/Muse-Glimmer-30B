@@ -68,9 +68,9 @@ spec:
               echo "└────────────────"
 
               t_mark "clone + install sglang-neuron branch"
-              git clone -q -b "$SGLANG_NEURON_BRANCH" "$SGLANG_NEURON_REPO" /tmp/sglang-neuron
-              [ -n "${SGLANG_NEURON_REF:-}" ] && git -C /tmp/sglang-neuron checkout -q "$SGLANG_NEURON_REF"
-              echo "PROVENANCE sglang-neuron: $SGLANG_NEURON_REPO branch $SGLANG_NEURON_BRANCH commit $(git -C /tmp/sglang-neuron rev-parse HEAD) — $(git -C /tmp/sglang-neuron log -1 --pretty=%s)"
+              git clone -q -b "$PLUGIN_BRANCH" "$PLUGIN_REPO" /tmp/sglang-neuron
+              [ -n "${PLUGIN_REF:-}" ] && git -C /tmp/sglang-neuron checkout -q "$PLUGIN_REF"
+              echo "PROVENANCE sglang-neuron: $PLUGIN_REPO branch $PLUGIN_BRANCH commit $(git -C /tmp/sglang-neuron rev-parse HEAD) — $(git -C /tmp/sglang-neuron log -1 --pretty=%s)"
               python3 -c 'import importlib.metadata as m; print("PROVENANCE before:", {p: m.version(p) for p in ("sglang", "sglang-neuron", "torch", "torch-neuronx", "neuronx-cc", "transformers")})' || true
               # the plugin's code only: the image's SGLang, torch and Neuron SDK stay as shipped
               # remove the image's copy first, so one sglang-neuron dist (one set of entry points) remains
@@ -159,12 +159,12 @@ spec:
               value: "https://github.com/yahavb/Muse-Glimmer-30B.git"
             - name: BRANCH
               value: "main"
-            - name: SGLANG_NEURON_REPO
+            - name: PLUGIN_REPO
               value: "https://github.com/yahavb/sglang-neuron.git"
-            - name: SGLANG_NEURON_BRANCH
+            - name: PLUGIN_BRANCH
               value: "muse-glimmer-text"
             # optional commit to check out after the clone (empty = branch head)
-            - name: SGLANG_NEURON_REF
+            - name: PLUGIN_REF
               value: ""
             - name: TP_DEGREE
               value: "8"
