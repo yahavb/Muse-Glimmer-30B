@@ -1,0 +1,589 @@
+diff --git a/sglang_neuron/models/catalog.py b/sglang_neuron/models/catalog.py
+index 5b550c1..8da528d 100644
+--- a/sglang_neuron/models/catalog.py
++++ b/sglang_neuron/models/catalog.py
+@@ -205,6 +205,9 @@ MODELS = {
+     ),
+     "Qwen3ForCausalLM": ModelSpec(package="sglang_neuron.models.qwen3", kv_cache_dtypes=("auto", "bf16", "bfloat16")),
+     "Glm4ForCausalLM": ModelSpec(package="sglang_neuron.models.glm4", kv_cache_dtypes=("auto", "bf16", "bfloat16")),
++    # text only (--language-model-only); its sliding layers keep one KV pool with the full layers
++    "MuseGlimmerForConditionalGeneration": ModelSpec(package="sglang_neuron.models.muse_glimmer",
++                                                     kv_cache_dtypes=("auto", "bf16", "bfloat16")),
+     "Qwen3MoeForCausalLM": ModelSpec(package="sglang_neuron.models.qwen3_moe",
+                                      kv_cache_dtypes=("auto", "bf16", "bfloat16")),
+     # the paged giga prefill writes each forward's final GDN state into SGLang's tracking slot, so the chunk-keyed tree
+diff --git a/sglang_neuron/models/muse_glimmer/__init__.py b/sglang_neuron/models/muse_glimmer/__init__.py
+new file mode 100644
+index 0000000..be5f985
+--- /dev/null
++++ b/sglang_neuron/models/muse_glimmer/__init__.py
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Muse-Glimmer-30B on Neuron, text only: the decoder of the multimodal checkpoint in plain PyTorch over the paged
++cache (launch with --language-model-only)."""
+diff --git a/sglang_neuron/models/muse_glimmer/config.py b/sglang_neuron/models/muse_glimmer/config.py
+new file mode 100644
+index 0000000..f7f15c2
+--- /dev/null
++++ b/sglang_neuron/models/muse_glimmer/config.py
+@@ -0,0 +1,101 @@
++# SPDX-License-Identifier: Apache-2.0
++"""The Muse-Glimmer text decoder's shape, from either form of its config.
++
++SGLang loads the checkpoint through its own flat ``MuseGlimmerConfig`` (sglang/srt/configs/muse_glimmer.py), which
++translates the Hugging Face export: ``no_rope_layers`` (1 = RoPE), ``output_soft_cap_temp``, and ``qk_scale_factor``
++multiplied by sqrt(head_dim). A Hugging Face ``MuseGlimmerConfig`` nests the decoder in ``text_config`` with the
++export's own names (``layer_rope_theta``, ``final_logit_softcapping``, ``qk_scale_factor``). Both are read here.
++
++Muse-Glimmer-30B: 52 layers, hidden 6656, 32 Q / 2 KV heads, head_dim 128, SwiGLU 19968, vocab 202048. Layers
++[sliding, sliding, sliding, full] x 13: sliding = window 2048 with RoPE (theta 500000, rotate-half), full = NoPE."""
++
++import math
++from dataclasses import dataclass
++
++ARCHITECTURE = "MuseGlimmerForConditionalGeneration"
++
++
++@dataclass(frozen=True)
++class MuseGlimmerTextConfig:
++    vocab_size: int
++    hidden_size: int
++    intermediate_size: int
++    num_hidden_layers: int
++    num_attention_heads: int
++    num_key_value_heads: int
++    head_dim: int
++    rms_norm_eps: float  # embedding norm, pre-norms, Q/K norm, final norm
++    post_norm_eps: float  # post-attention and post-MLP norms
++    rope_theta: float
++    sliding_window: int
++    sliding: tuple  # per layer: sliding window (True) or full attention
++    rope: tuple  # per layer: RoPE (True) or NoPE
++    q_scale: float  # the weight-less Q norm's gain, the whole softmax scale (3.87 / sqrt(head_dim))
++    output_multiplier: float
++    logit_cap: float  # logits = cap * tanh(logits * output_multiplier / cap)
++    tie_word_embeddings: bool
++
++    def windows(self) -> list:
++        return [self.sliding_window if s else None for s in self.sliding]
++
++
++def _get(config, name, default=None):
++    if isinstance(config, dict):
++        return config.get(name, default)
++    return getattr(config, name, default)
++
++
++def text_config(hf_config) -> MuseGlimmerTextConfig:
++    """The decoder's config, refusing what the graphs do not serve."""
++    text = _get(hf_config, "text_config")
++    nested = text is not None
++    c = text if nested else hf_config
++    n = int(_get(c, "num_hidden_layers"))
++    head_dim = int(_get(c, "head_dim"))
++    layer_types = list(_get(c, "layer_types") or [])
++    if len(layer_types) != n:
++        raise ValueError(f"Muse-Glimmer: layer_types has {len(layer_types)} entries for {n} layers")
++    bad = sorted({t for t in layer_types if t not in ("sliding_attention", "full_attention")})
++    if bad:
++        raise ValueError(f"Muse-Glimmer: layer kinds {bad} are not served")
++    if nested:
++        thetas = list(_get(c, "layer_rope_theta"))
++        rope = tuple(bool(t) for t in thetas)
++        rope_theta = float((_get(c, "rope_parameters") or {}).get("rope_theta", 0) or next(t for t in thetas if t))
++        if len({t for t in thetas if t}) > 1:
++            raise ValueError(f"Muse-Glimmer: one RoPE theta is served, the config has {sorted(set(thetas))}")
++        # the export's defaults where a key is absent, as the validated vLLM Neuron port (contrib muse_glimmer)
++        q_scale = float(_get(c, "qk_scale_factor", 3.87)) / math.sqrt(head_dim)
++        cap = _get(c, "final_logit_softcapping", 20.0)
++    else:
++        rope = tuple(int(x) == 1 for x in _get(c, "no_rope_layers"))
++        rope_theta = float(_get(c, "rope_theta"))
++        # SGLang's config holds the export's factor times sqrt(head_dim), and scales scores by it over head_dim
++        q_scale = float(_get(c, "qk_scale_factor")) / head_dim
++        cap = _get(c, "output_soft_cap_temp")
++        for flag in ("use_qk_norm", "use_attn_output_gate", "normalize_tok_embeddings", "rope_is_neox_style"):
++            if not _get(c, flag, True):
++                raise ValueError(f"Muse-Glimmer: {flag}=False is not served")
++    if len(rope) != n:
++        raise ValueError(f"Muse-Glimmer: {len(rope)} RoPE flags for {n} layers")
++    if not cap:
++        raise ValueError("Muse-Glimmer: a config without the final logit soft cap is not served")
++    return MuseGlimmerTextConfig(
++        vocab_size=int(_get(c, "vocab_size")),
++        hidden_size=int(_get(c, "hidden_size")),
++        intermediate_size=int(_get(c, "intermediate_size")),
++        num_hidden_layers=n,
++        num_attention_heads=int(_get(c, "num_attention_heads")),
++        num_key_value_heads=int(_get(c, "num_key_value_heads")),
++        head_dim=head_dim,
++        rms_norm_eps=float(_get(c, "rms_norm_eps", 1e-5)),
++        post_norm_eps=float(_get(c, "post_norm_eps", 1e-8)),
++        rope_theta=rope_theta,
++        sliding_window=int(_get(c, "sliding_window", 2048)),
++        sliding=tuple(t == "sliding_attention" for t in layer_types),
++        rope=rope,
++        q_scale=q_scale,
++        output_multiplier=float(_get(c, "output_multiplier", 0.19611613513818404)),
++        logit_cap=float(cap),
++        tie_word_embeddings=bool(_get(hf_config, "tie_word_embeddings", False)),
++    )
+diff --git a/sglang_neuron/models/muse_glimmer/graph.py b/sglang_neuron/models/muse_glimmer/graph.py
+new file mode 100644
+index 0000000..563cd43
+--- /dev/null
++++ b/sglang_neuron/models/muse_glimmer/graph.py
+@@ -0,0 +1,376 @@
++# SPDX-License-Identifier: Apache-2.0
++"""The Muse-Glimmer text decoder as the runtime's role graphs (one class, ``phase`` prefill or decode), on attention
++TP, in plain PyTorch: the same math as the validated vLLM Neuron port (vllm-neuron contrib/models/muse_glimmer,
++model_bf16.py), which follows HF MuseGlimmerTextModel. No NKI kernel runs in the model; the KV cache is the runtime's
++paged pool, read through the block table and written at the slot mapping.
++
++Muse-Glimmer, as HF:
++  - a weight-less RMSNorm after the embedding; a standard RMSNorm (x * w) at the end
++  - four centered RMSNorms per layer (x * (1 + w)); the post-attention and post-MLP ones use post_norm_eps
++  - gated attention: o_proj(attn * sigmoid(gate_proj(x)))
++  - weight-less Q/K RMSNorm, Q scaled by qk_scale_factor / sqrt(head_dim), the whole softmax scale
++  - [sliding x3, full] layers: sliding = window 2048 + RoPE (rotate-half), full = NoPE
++  - logits = cap * tanh(logits * output_multiplier / cap), on each rank's vocabulary shard
++"""
++
++import os
++
++import torch
++import torch.nn.functional as F
++from sglang.srt.distributed.parallel_state import get_attn_tp_group
++from torch import nn
++
++from sglang_neuron.layers import ColumnParallelLinear
++from sglang_neuron.layers.embedding import VocabDimShardedEmbedding
++from sglang_neuron.mem_cache.kv_cache import KVSpec, LayerSpec
++from sglang_neuron.models.muse_glimmer.config import MuseGlimmerTextConfig
++from sglang_neuron.models.transformer import weights
++from sglang_neuron.parallel import collectives as neuron_collectives
++from sglang_neuron.parallel import groups
++from sglang_neuron.utils.checkpoints import SafetensorsCheckpoint
++from sglang_neuron.utils.weight_loader import SafetensorsWeightLoader, set_weight_loader
++
++DTYPE = torch.bfloat16
++# MUSE_GLIMMER_KV_ROW_WRITE=1: write K/V as rows of a [slots, d] view (exact, same values and slots) and declare the
++# caches in_place_targets, so the warm-up refuses a cache the NEFF copies back. Off: the original 3-D index write.
++KV_ROW_WRITE = os.environ.get("MUSE_GLIMMER_KV_ROW_WRITE", "0") == "1"
++# MUSE_GLIMMER_KV_ROW_GATHER=1: read the cached K/V as whole-page rows of a [pages, page * d] view (exact: same values,
++# same order). Off: the 5-D advanced-index gather and permute.
++KV_ROW_GATHER = os.environ.get("MUSE_GLIMMER_KV_ROW_GATHER", "0") == "1"
++# MUSE_GLIMMER_KV_ONEHOT_GATHER=1: gather the row's pages by a one-hot matmul over the pool (exact: one 1 * x term per
++# element), prefill and decode. Off: the 5-D advanced-index gather.
++KV_ONEHOT_GATHER = os.environ.get("MUSE_GLIMMER_KV_ONEHOT_GATHER", "0") == "1"
++# MUSE_GLIMMER_DENSE_DECODE=1: the decode attends over the whole KV pool read in place, the row's slots found by the
++# block table's inverse, instead of gathering its pages (profile: the gather is ~45 ms of a 91 ms step at a 16K pool).
++# Same keys and values; the softmax sums over the pool in another order. Off: the gather. Prefill keeps the gather.
++DENSE_DECODE = os.environ.get("MUSE_GLIMMER_DENSE_DECODE", "0") == "1"
++# the decoder's prefix in the multimodal checkpoint (HF MuseGlimmerForConditionalGeneration)
++SRC = "model.language_model"
++
++
++def _rms(x: torch.Tensor, eps: float) -> torch.Tensor:
++    """HF MuseGlimmer's RMS core, in fp32."""
++    x = x.float()
++    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
++
++
++class CenteredRMSNorm(nn.Module):
++    """HF MuseGlimmerTextCenteredRMSNorm: x * (1 + w)."""
++
++    def __init__(self, size: int, eps: float):
++        super().__init__()
++        self.weight = nn.Parameter(torch.zeros(size, dtype=DTYPE))
++        self.eps = eps
++
++    def forward(self, x):
++        return (_rms(x, self.eps) * (1.0 + self.weight.float())).to(x.dtype)
++
++
++class RMSNorm(nn.Module):
++    """HF MuseGlimmerRMSNorm (the final norm): x * w."""
++
++    def __init__(self, size: int, eps: float):
++        super().__init__()
++        self.weight = nn.Parameter(torch.ones(size, dtype=DTYPE))
++        self.eps = eps
++
++    def forward(self, x):
++        return (_rms(x, self.eps) * self.weight.float()).to(x.dtype)
++
++
++def column_rows_loader(rows: int) -> SafetensorsWeightLoader:
++    """A column-parallel [out, H] projection (the attention output gate): this rank's output rows, as [H, out / tp]."""
++    return SafetensorsWeightLoader(transform=lambda slices, rank: slices[0][rank * rows:(rank + 1) * rows].t())
++
++
++class Attention(nn.Module):
++    def __init__(self, config: MuseGlimmerTextConfig, layer_idx: int):
++        super().__init__()
++        self.name = f"layers.{layer_idx}.self_attn"
++        self.attn_tp_group = groups.get_neuron_attn_tp_group()
++        tp = get_attn_tp_group().world_size
++        kv = config.num_key_value_heads
++        if config.num_attention_heads % tp:
++            raise ValueError(f"{config.num_attention_heads} attention heads do not shard over an attention TP of {tp}")
++        if kv % tp and tp % kv:
++            raise ValueError(f"{kv} KV heads neither shard over nor replicate across an attention TP of {tp}")
++        self.head_dim = d = config.head_dim
++        self.num_heads = config.num_attention_heads // tp
++        self.num_kv_heads = max(1, kv // tp)
++        self.eps = config.rms_norm_eps
++        self.q_scale = config.q_scale
++        self.use_rope = config.rope[layer_idx]
++        self.sliding_window = config.sliding_window if config.sliding[layer_idx] else None
++        q, kvw = self.num_heads * d, self.num_kv_heads * d
++        self.qkv_weight = nn.Parameter(torch.empty(config.hidden_size, q + 2 * kvw, dtype=DTYPE))
++        self.gate_weight = nn.Parameter(torch.empty(config.hidden_size, q, dtype=DTYPE))
++        self.o_weight = nn.Parameter(torch.empty(q, config.hidden_size, dtype=DTYPE))
++        set_weight_loader(self.qkv_weight, weights.fused_qkv_weight_loader(tp, q, kvw, kv))
++        set_weight_loader(self.gate_weight, column_rows_loader(q))
++        set_weight_loader(self.o_weight, weights.row_parallel_loader(q))
++        # the decode graph's attention over the whole pool (MUSE_GLIMMER_DENSE_DECODE; set by the graph)
++        self.dense_decode = False
++        # bound by bind_kv_cache: [pages, kv_heads, page, d] each
++        self.k_cache = None
++        self.v_cache = None
++
++    def forward(self, x, positions, cos, sin, md):
++        """``x`` [T, H] of B rows of S tokens each: a prefill is one request's chunk (B 1), a decode one token a row
++        (S 1). Returns this layer's attention output, all-reduced over the attention TP."""
++        block_table = md["block_table_tensor"]
++        bs = md["block_size"]
++        B, nblk = block_table.shape
++        T = x.shape[0]
++        S = T // B
++        nq, nkh, D = self.num_heads, self.num_kv_heads, self.head_dim
++
++        q, k, v = (x @ self.qkv_weight).split([nq * D, nkh * D, nkh * D], dim=-1)
++        q = (_rms(q.view(T, nq, D), self.eps) * self.q_scale).to(DTYPE)
++        k = _rms(k.view(T, nkh, D), self.eps).to(DTYPE)
++        v = v.view(T, nkh, D)
++        if self.use_rope:
++            q, k = _rope(q, cos, sin), _rope(k, cos, sin)
++
++        pages = self.k_cache.shape[0]
++        if self.dense_decode and S == 1 and nkh == 1:
++            return self._dense_decode(x, q, k, v, positions, md, pages, bs, B, nblk, T)
++        # the cached K/V of each row: [B, nkh, nblk * bs, D]
++        table = torch.clamp(block_table, min=0).to(torch.long)
++        if KV_ONEHOT_GATHER and nkh == 1:
++            # the row's pages in table order by a one-hot matmul over the whole pool, read in place: each output element
++            # is one 1 * x term (the rest exact zeros of a zero-initialised, finite pool), so the same bf16 values as
++            # the gather below, without its dynamic DMA
++            onehot = (table.unsqueeze(-1) == torch.arange(pages, device=x.device).view(1, 1, pages)).to(DTYPE)
++            kc = torch.matmul(onehot, self.k_cache.view(pages, bs * D)).view(B, 1, nblk * bs, D)
++            vc = torch.matmul(onehot, self.v_cache.view(pages, bs * D)).view(B, 1, nblk * bs, D)
++        elif KV_ROW_GATHER and nkh == 1:
++            # whole pages as rows of a [pages, page * d] view: one index_select of nblk rows of page * d each, the
++            # same values in the same order as the 5-D gather + permute below (one KV head: the permute moves nothing)
++            kc = self.k_cache.view(pages, bs * D).index_select(0, table.reshape(-1)).view(B, 1, nblk * bs, D)
++            vc = self.v_cache.view(pages, bs * D).index_select(0, table.reshape(-1)).view(B, 1, nblk * bs, D)
++        else:
++            kc = self.k_cache[table].permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
++            vc = self.v_cache[table].permute(0, 2, 1, 3, 4).reshape(B, nkh, nblk * bs, D)
++
++        # the absolute position of each cached slot; a decode's sliding table is trimmed to the window and starts at
++        # swa_kv_pos_offset
++        slot_pos = torch.arange(nblk * bs, device=x.device).view(1, 1, -1)
++        offset = md.get("swa_kv_pos_offset")
++        if self.sliding_window is not None and offset is not None:
++            slot_pos = slot_pos + offset.view(B, 1, 1).to(slot_pos.dtype)
++        pos = positions.view(B, S, 1).to(slot_pos.dtype)
++        # only tokens of earlier steps are in the cache, the positions before this chunk's first: the chunk's own K/V
++        # are written after this read, and come from k / v below
++        chunk_start = positions.view(B, S)[:, :1].to(slot_pos.dtype).view(B, 1, 1)
++        valid = (block_table >= 0).repeat_interleave(bs, dim=1).view(B, 1, -1)
++        prior_ok = valid & (slot_pos < chunk_start) & (slot_pos < pos)
++        new_pos = positions.view(B, 1, S).to(slot_pos.dtype)
++        # causal among the new tokens by index, not position: the runtime pads a chunk at its end
++        idx = torch.arange(S, device=x.device)
++        new_ok = (idx.view(1, 1, S) <= idx.view(1, S, 1)).expand(B, S, S)
++        if self.sliding_window is not None:
++            prior_ok = prior_ok & (slot_pos > pos - self.sliding_window)
++            new_ok = new_ok & (new_pos > pos - self.sliding_window)
++        allowed = torch.cat([prior_ok, new_ok], dim=-1)  # [B, S, C + S]
++
++        qb = q.view(B, S, nq, D).permute(0, 2, 1, 3)
++        kb = torch.cat([kc, k.view(B, S, nkh, D).permute(0, 2, 1, 3).to(kc.dtype)], dim=2)
++        vb = torch.cat([vc, v.view(B, S, nkh, D).permute(0, 2, 1, 3).to(vc.dtype)], dim=2)
++        kb = kb.repeat_interleave(nq // nkh, dim=1)
++        vb = vb.repeat_interleave(nq // nkh, dim=1)
++        scores = torch.matmul(qb.float(), kb.float().transpose(-1, -2))
++        scores = scores.masked_fill(~allowed.view(B, 1, S, -1), float("-inf"))
++        attn = torch.matmul(torch.softmax(scores, dim=-1), vb.float()).to(DTYPE)  # [B, nq, S, D]
++        attn = attn.permute(0, 2, 1, 3).reshape(T, nq * D)
++        out = (attn * torch.sigmoid(x @ self.gate_weight)) @ self.o_weight
++
++        self._write_kv(k, v, md, pages, bs, T)
++        return neuron_collectives.all_reduce(self.attn_tp_group, out)
++
++    def _dense_decode(self, x, q, k, v, positions, md, pages, bs, B, nblk, T):
++        """MUSE_GLIMMER_DENSE_DECODE: a decode step (one token a row, one KV head a rank) over the whole pool, read in
++        place, with each slot's position from the inverse of the row's block table; slots outside the table are masked.
++        The same keys and values as the gather path, so the same attention up to the softmax's summation order."""
++        nq, D = self.num_heads, self.head_dim
++        C = pages * bs
++        dev = x.device
++        kc = self.k_cache.view(1, C, D)
++        vc = self.v_cache.view(1, C, D)
++        # each page's column in the row's table (-1: not in it); unused table entries go to a spare column
++        cols = torch.arange(nblk, device=dev).view(1, nblk).expand(B, nblk)
++        dst = torch.where(md["block_table_tensor"] >= 0, md["block_table_tensor"].to(torch.long),
++                          torch.full_like(cols, pages))
++        inv = torch.full((B, pages + 1), -1, dtype=torch.long, device=dev).scatter(1, dst, cols)[:, :pages]
++        slot_pos = (inv.unsqueeze(-1) * bs + torch.arange(bs, device=dev).view(1, 1, bs)).view(B, C)
++        valid = (inv >= 0).unsqueeze(-1).expand(B, pages, bs).reshape(B, C)
++        offset = md.get("swa_kv_pos_offset")
++        if self.sliding_window is not None and offset is not None:
++            slot_pos = slot_pos + offset.view(B, 1).to(slot_pos.dtype)
++        pos = positions.view(B, 1).to(slot_pos.dtype)
++        prior_ok = valid & (slot_pos < pos)
++        if self.sliding_window is not None:
++            prior_ok = prior_ok & (slot_pos > pos - self.sliding_window)
++        qf = q.view(B, nq, D).float()
++        s_prior = torch.matmul(qf, kc.float().transpose(-1, -2))  # [B, nq, C]
++        s_new = (qf * k.view(B, 1, D).float()).sum(-1, keepdim=True)  # [B, nq, 1]
++        s_prior = s_prior.masked_fill(~prior_ok.view(B, 1, C), float("-inf"))
++        p = torch.softmax(torch.cat([s_prior, s_new], dim=-1), dim=-1)
++        attn = torch.matmul(p[..., :C], vc.float()) + p[..., C:] * v.view(B, 1, D).float()  # [B, nq, D]
++        attn = attn.to(DTYPE).reshape(T, nq * D)
++        out = (attn * torch.sigmoid(x @ self.gate_weight)) @ self.o_weight
++        self._write_kv(k, v, md, pages, bs, T)
++        return neuron_collectives.all_reduce(self.attn_tp_group, out)
++
++    def _write_kv(self, k, v, md, pages, bs, T):
++        D = self.head_dim
++        nkh = self.num_kv_heads
++        # write this step's K/V; slots outside the pool (padding) go to slot 0, on SGLang's reserved page
++        slots = md["slot_mapping"].reshape(-1).to(torch.long)
++        slots = torch.where((slots < 0) | (slots >= pages * bs), torch.zeros_like(slots), slots)
++        if KV_ROW_WRITE and nkh == 1:
++            # one row per slot of the [pages * page, d] view, as GLM-5.2's caches. Measured on trn2: no faster than the
++            # 3-D index write below (both written in place; in_place_targets checks it at warm-up)
++            self.k_cache.view(pages * bs, D).index_put_((slots,), k.reshape(T, D).to(self.k_cache.dtype))
++            self.v_cache.view(pages * bs, D).index_put_((slots,), v.reshape(T, D).to(self.v_cache.dtype))
++        else:
++            self.k_cache[slots // bs, :, slots % bs] = k.to(self.k_cache.dtype)
++            self.v_cache[slots // bs, :, slots % bs] = v.to(self.v_cache.dtype)
++
++
++def _rope(x, cos, sin):
++    """x [T, N, D]; cos / sin [T, D]; rotate-half, as HF apply_rotary_pos_emb."""
++    half = x.shape[-1] // 2
++    rot = torch.cat((-x[..., half:], x[..., :half]), dim=-1)
++    return (x * cos[:, None, :] + rot * sin[:, None, :]).to(x.dtype)
++
++
++class MLP(nn.Module):
++    """SwiGLU: down(silu(gate(x)) * up(x)), the intermediate dimension sharded over the attention TP."""
++
++    def __init__(self, config: MuseGlimmerTextConfig):
++        super().__init__()
++        self.attn_tp_group = groups.get_neuron_attn_tp_group()
++        tp = self.attn_tp_group.world_size
++        if config.intermediate_size % tp:
++            raise ValueError(f"an intermediate size of {config.intermediate_size} does not shard over {tp} ranks")
++        rows = config.intermediate_size // tp
++        self.gate_up_weight = nn.Parameter(torch.empty(config.hidden_size, 2 * rows, dtype=DTYPE))
++        self.down_weight = nn.Parameter(torch.empty(rows, config.hidden_size, dtype=DTYPE))
++        set_weight_loader(self.gate_up_weight, weights.gate_up_loader(rows, fused=False))
++        set_weight_loader(self.down_weight, weights.row_parallel_loader(rows))
++
++    def forward(self, x):
++        gate, up = (x @ self.gate_up_weight).chunk(2, dim=-1)
++        return neuron_collectives.all_reduce(self.attn_tp_group, (F.silu(gate) * up) @ self.down_weight)
++
++
++class DecoderLayer(nn.Module):
++    def __init__(self, config: MuseGlimmerTextConfig, layer_idx: int):
++        super().__init__()
++        h = config.hidden_size
++        self.input_layernorm = CenteredRMSNorm(h, config.rms_norm_eps)
++        self.post_attention_layernorm = CenteredRMSNorm(h, config.post_norm_eps)
++        self.pre_feedforward_layernorm = CenteredRMSNorm(h, config.rms_norm_eps)
++        self.post_feedforward_layernorm = CenteredRMSNorm(h, config.post_norm_eps)
++        self.self_attn = Attention(config, layer_idx)
++        self.mlp = MLP(config)
++
++    def forward(self, x, positions, cos, sin, md):
++        x = x + self.post_attention_layernorm(self.self_attn(self.input_layernorm(x), positions, cos, sin, md))
++        return x + self.post_feedforward_layernorm(self.mlp(self.pre_feedforward_layernorm(x)))
++
++
++class MuseGlimmerGraph(nn.Module):
++    """One role graph: ``phase`` "prefill" or "decode"."""
++
++    def __init__(self, config: MuseGlimmerTextConfig, phase: str):
++        super().__init__()
++        if phase not in ("prefill", "decode"):
++            raise ValueError(f"a role graph is a prefill or a decode, not {phase!r}")
++        self.config = config
++        self.phase = phase
++        self.tp_group = get_attn_tp_group()
++        self.lm_head_tp_group = group = groups.get_neuron_attn_tp_group()
++        self.embed_tokens = VocabDimShardedEmbedding(config.vocab_size, config.hidden_size, dtype=DTYPE,
++                                                     tp_group=group.device_group)
++        self.layers = nn.ModuleList([DecoderLayer(config, i) for i in range(config.num_hidden_layers)])
++        for layer in self.layers:
++            layer.self_attn.dense_decode = DENSE_DECODE and phase == "decode"
++        self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
++        self.lm_head = ColumnParallelLinear(config.hidden_size, config.vocab_size, dtype=DTYPE, gather_output=True,
++                                            tp_group=group.device_group)
++        set_weight_loader(self.embed_tokens.weight,
++                          weights.vocab_rows_loader(self.embed_tokens.vocab_size_per_rank, config.hidden_size))
++        set_weight_loader(self.lm_head.weight,
++                          weights.vocab_rows_loader(self.lm_head.out_features_per_rank, config.hidden_size))
++        inv_freq = 1.0 / (config.rope_theta ** (torch.arange(0, config.head_dim, 2, dtype=torch.float)
++                                                / config.head_dim))
++        self.register_buffer("inv_freq", inv_freq, persistent=False)
++        # the layers the runtime keys attention metadata by, and each one's window
++        self.layer_names = [layer.self_attn.name for layer in self.layers]
++        self.sliding_windows = config.windows()
++
++    def _rope_tables(self, positions):
++        freqs = positions.float()[:, None] * self.inv_freq[None, :]
++        emb = torch.cat((freqs, freqs), dim=-1)
++        return emb.cos().to(DTYPE), emb.sin().to(DTYPE)
++
++    @torch.no_grad()
++    def forward(self, input_ids, positions, attn_metadata, sampling_positions, rank):
++        h = self.embed_tokens(input_ids, scatter_tokens=False, rank=rank)
++        h = _rms(h, self.config.rms_norm_eps).to(h.dtype)
++        cos, sin = self._rope_tables(positions)
++        for layer in self.layers:
++            h = layer(h, positions, cos, sin, attn_metadata[layer.self_attn.name])
++        h = self.norm(h.index_select(0, sampling_positions))
++        logits = self.lm_head(h)
++        cap = self.config.logit_cap
++        return (torch.tanh(logits.float() * (self.config.output_multiplier / cap)) * cap).to(logits.dtype)
++
++    def get_kv_spec(self) -> KVSpec:
++        return KVSpec(layers=[LayerSpec(name=name) for name in self.layer_names])
++
++    def in_place_targets(self) -> dict:
++        """With MUSE_GLIMMER_KV_ROW_WRITE, the caches the graph writes in place, which the warm-up proves."""
++        if not KV_ROW_WRITE:
++            return {}
++        out = {}
++        for layer in self.layers:
++            a = layer.self_attn
++            if a.num_kv_heads == 1:
++                out[f"{a.name}.k_cache"], out[f"{a.name}.v_cache"] = a.k_cache, a.v_cache
++        return out
++
++    def bind_kv_cache(self, kv_caches: dict) -> None:
++        for layer in self.layers:
++            attn = layer.self_attn
++            attn.k_cache, attn.v_cache = kv_caches[attn.name]
++
++    def hf_weight_mappings(self) -> dict:
++        m = {"embed_tokens.weight": f"{SRC}.embed_tokens.weight", "norm.weight": f"{SRC}.norm.weight",
++             "lm_head.weight": "lm_head.weight"}
++        for i in range(len(self.layers)):
++            s, d = f"{SRC}.layers.{i}", f"layers.{i}"
++            m[f"{d}.self_attn.qkv_weight"] = [f"{s}.self_attn.{n}_proj.weight" for n in "qkv"]
++            m[f"{d}.self_attn.gate_weight"] = f"{s}.self_attn.gate_proj.weight"
++            m[f"{d}.self_attn.o_weight"] = f"{s}.self_attn.o_proj.weight"
++            for n in ("input_layernorm", "post_attention_layernorm", "pre_feedforward_layernorm",
++                      "post_feedforward_layernorm"):
++                m[f"{d}.{n}.weight"] = f"{s}.{n}.weight"
++            m[f"{d}.mlp.gate_up_weight"] = [f"{s}.mlp.gate_proj.weight", f"{s}.mlp.up_proj.weight"]
++            m[f"{d}.mlp.down_weight"] = f"{s}.mlp.down_proj.weight"
++        return m
++
++    def load_weights(self, checkpoint_path: str, device: torch.device) -> None:
++        """This rank's shard of every decoder parameter; the vision tower's keys are not read."""
++        checkpoint = SafetensorsCheckpoint(checkpoint_path)
++        state = checkpoint.load_sharded_pipelined(self.tp_group.rank_in_group, self.tp_group.world_size, self,
++                                                  self.hf_weight_mappings(), device).state_dict
++        for k, t in state.items():
++            if t.dtype != DTYPE:
++                state[k] = t.to(DTYPE)
++        missing = sorted(set(dict(self.named_parameters())) - set(state))
++        if missing:
++            raise RuntimeError(f"Muse-Glimmer: the checkpoint did not provide {len(missing)} parameters, e.g. "
++                               f"{missing[:4]}")
++        self.load_state_dict(state, strict=False, assign=True)
+diff --git a/sglang_neuron/models/muse_glimmer/sglang_model.py b/sglang_neuron/models/muse_glimmer/sglang_model.py
+new file mode 100644
+index 0000000..908b484
+--- /dev/null
++++ b/sglang_neuron/models/muse_glimmer/sglang_model.py
+@@ -0,0 +1,71 @@
++# SPDX-License-Identifier: Apache-2.0
++"""MuseGlimmerForConditionalGeneration: the host SGLang builds for a Muse-Glimmer checkpoint (models/host.py). Text
++only: it builds the decoder's graphs (models/muse_glimmer/graph.py) and reads none of the vision tower's weights, so a
++launch takes --language-model-only, which makes SGLang refuse image and video input instead of processing it."""
++
++import copy
++import logging
++
++from torch import nn
++
++from sglang_neuron.models.host import ModelHost
++from sglang_neuron.models.muse_glimmer.config import ARCHITECTURE, text_config
++from sglang_neuron.models.muse_glimmer.graph import MuseGlimmerGraph
++from sglang_neuron.models.transformer.config import check_bf16_launch, check_no_expert_parallel
++
++logger = logging.getLogger(__name__)
++
++
++def decoder_config(config):
++    """The decoder's config object the runtime reads (layers, heads, layer_types, sliding_window): a Hugging Face
++    config's text_config, carrying the checkpoint path the host loads from; SGLang's flat config as it is."""
++    text = getattr(config, "text_config", None)
++    if text is None:
++        return config
++    text = copy.copy(text)
++    text._name_or_path = getattr(config, "_name_or_path", "") or getattr(text, "_name_or_path", "")
++    for name in ("dtype", "torch_dtype"):
++        if getattr(text, name, None) is None and getattr(config, name, None) is not None:
++            setattr(text, name, getattr(config, name))
++    return text
++
++
++class MuseGlimmerForConditionalGeneration(ModelHost):
++    name = "Muse-Glimmer"
++    # the prefill attention is the graph's own (plain PyTorch), not the segmented kernel, and runs whole chunks
++    segmented_prefill = False
++    prefill_ladder = False
++
++    def __init__(self, config, quant_config=None, prefix: str = "", **kwargs):
++        if not getattr(config, "language_model_only", False):
++            raise ValueError(f"{ARCHITECTURE} on Neuron serves text only: launch with --language-model-only")
++        super().__init__(decoder_config(config), quant_config, prefix, **kwargs)
++
++    def check_launch(self, config) -> None:
++        check_bf16_launch(config, self.name)
++        check_no_expert_parallel(self.name)
++        if getattr(config, "quantization_config", None):
++            raise ValueError(f"{self.name}: the graphs serve bf16 checkpoints; this one is quantized")
++        cfg = text_config(config)
++        if cfg.tie_word_embeddings:
++            raise ValueError(f"{self.name}: tied word embeddings are not served")
++        logger.info("%s decoder: %s", self.name, cfg)
++
++    def neuron_compiler_args(self, phase: str, default_args: list[str]) -> list[str]:
++        """The platform's arguments, and with MUSE_GLIMMER_NEURON_MODEL_TYPE set (e.g. "transformer", what the vLLM
++        Neuron port compiles the same graphs with) that model type in place of the platform's generic one: a list that
++        names a model type keeps it (backend/stack.py). Unset: the platform's arguments as they are."""
++        import os
++
++        args = super().neuron_compiler_args(phase, default_args)
++        model_type = os.environ.get("MUSE_GLIMMER_NEURON_MODEL_TYPE", "")
++        if model_type:
++            args = [a for a in args if not a.startswith("--model-type")] + [f"--model-type={model_type}"]
++            logger.info("%s %s compiler arguments: %s", self.name, phase, args)
++        return args
++
++    def build_graph(self, phase: str, config) -> nn.Module:
++        return MuseGlimmerGraph(text_config(config), phase)
++
++
++EntryClass = [MuseGlimmerForConditionalGeneration]
