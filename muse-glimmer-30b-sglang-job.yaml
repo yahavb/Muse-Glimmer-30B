@@ -118,6 +118,12 @@ spec:
               python3 scripts/sglang_text_client.py --url http://127.0.0.1:30000 --model Muse-Glimmer-30B \
                 --max-tokens 256 --runs "$CLIENT_RUNS" --label sglang --dump /tmp/answers_sglang.json || echo "CLIENT FAILED"
               python3 -c 'import json; print("ANSWERS_JSON", json.dumps(json.load(open("/tmp/answers_sglang.json"))))' || true
+              if [ "${RUN_GSM8K:-0}" = "1" ]; then
+                t_mark "GSM8K ($GSM8K_N questions, few-shot, /v1/completions)"
+                echo "════════ GSM8K ════════"
+                python3 scripts/gsm8k_openai.py --url http://127.0.0.1:30000 --model Muse-Glimmer-30B \
+                  --num-questions "$GSM8K_N" --label sglang || echo "GSM8K FAILED"
+              fi
               # stay up for profiling with kubectl exec (KEEP_ALIVE_S seconds), the server still running
               [ "${KEEP_ALIVE_S:-0}" -gt 0 ] && { echo "KEEP ALIVE ${KEEP_ALIVE_S}s"; sleep "$KEEP_ALIVE_S"; } || true
 
@@ -177,8 +183,12 @@ spec:
               value: "2048"
             - name: CLIENT_RUNS
               value: "4"
+            - name: RUN_GSM8K
+              value: "1"
+            - name: GSM8K_N
+              value: "100"
             - name: KEEP_ALIVE_S
-              value: "3600"
+              value: "0"
             # KV pool of 16,384 tokens, the vLLM job's (512 blocks x 32). The decode's cost grows with the pool: 305K
             # tokens (the default from --mem-fraction-static) 6.27 tok/s, 16K 11.18 tok/s, same answers (trn2, TP=8)
             - name: EXTRA_SERVER_ARGS
