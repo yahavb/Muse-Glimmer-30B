@@ -1,5 +1,20 @@
 # Muse-Glimmer-30B text serving on trn2: SGLang (sglang-neuron) vs vLLM Neuron
 
+## Current (2026-11-17, Muse repo 61ba8e2, one job each, same node, both with the one-hot KV gather)
+
+| Server | Time to first token | Decode | 256-token answer | GSM8K (100 questions) |
+| --- | --- | --- | --- | --- |
+| vLLM Neuron (`muse-glimmer-30b-vllm-text-job.yaml`) | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
+| SGLang (`muse-glimmer-30b-sglang-job.yaml`) | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| vLLM Neuron before the fix (same job, flag off) | 0.390 s | 12.38 tok/s | 20.98 s | 0.96 |
+
+GSM8K: `scripts/gsm8k_openai.py`, the prompts of SGLang's `few_shot_gsm8k` (5-shot, greedy, 512 new tokens) over
+/v1/completions on both servers; 0 invalid answers on every row. On 100 questions one question is 0.01, so the three
+scores are within a few questions of each other. vLLM's fix is the same one-hot gather in its contrib model
+(`MUSE_GLIMMER_KV_ONEHOT_GATHER=1`; the model file comes from a cluster ConfigMap, `MODEL_OVERRIDE=1`).
+
+## History
+
 Same node (trn2.48xlarge), same claim (`m-lnc2`, 2 devices, LNC2), TP=8, context 2048, one request at a time,
 greedy, the same client (`scripts/sglang_text_client.py`): 63-token prompt "Explain quantum computing in simple terms.",
 256 tokens out, median of 3 warm runs (spread 0.00 s on every row).
