@@ -183,6 +183,10 @@ spec:
             # tokens (the default from --mem-fraction-static) 6.27 tok/s, 16K 11.18 tok/s, same answers (trn2, TP=8)
             - name: EXTRA_SERVER_ARGS
               value: "--max-total-tokens 16384"
+            # the KV pages gathered by a one-hot matmul over the pool (sglang-neuron f607a28): decode 11.18 -> 44.64
+            # tok/s, GSM8K (100 questions) 0.98 against 0.97, deterministic (results/sglang-text-trn2)
+            - name: MUSE_GLIMMER_KV_ONEHOT_GATHER
+              value: "1"
             - name: CHUNK
               value: "1024"
             - name: MAX_RUNNING
