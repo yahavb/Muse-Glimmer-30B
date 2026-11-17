@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="330" viewBox="0 0 760 330" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-label="Three software stacks on Trainium: native PyTorch on TorchNeuron; vLLM with the vllm-neuron plugin on libtorch-neuronx-lite; SGLang with the sglang-neuron plugin on TorchNeuron; all on the Neuron compiler and runtime.">
+<rect width="760" height="330" fill="#fcfcfb"/>
+<text x="138.0" y="44" font-size="14" font-weight="600" fill="#0b0b0b" text-anchor="middle">Native PyTorch</text>
+<rect x="24" y="60" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="138.0" y="87.0" font-size="12" fill="#0b0b0b" text-anchor="middle">Muse-Glimmer (HF transformers)</text>
+<rect x="24" y="114" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="138.0" y="141.0" font-size="12" fill="#0b0b0b" text-anchor="middle">torch.compile(backend="neuron")</text>
+<rect x="24" y="168" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="138.0" y="195.0" font-size="12" fill="#0b0b0b" text-anchor="middle">TorchNeuron (torch-neuronx)</text>
+<text x="378.0" y="44" font-size="14" font-weight="600" fill="#0b0b0b" text-anchor="middle">vLLM</text>
+<rect x="264" y="60" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="378.0" y="87.0" font-size="12" fill="#0b0b0b" text-anchor="middle">vLLM 0.32 (scheduler, API)</text>
+<rect x="264" y="114" width="228" height="46" rx="4" fill="#2a78d6" stroke="#898781" stroke-width="1"/>
+<text x="378.0" y="141.0" font-size="12" fill="#ffffff" text-anchor="middle">vllm-neuron + contrib muse_glimmer</text>
+<rect x="264" y="168" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="378.0" y="195.0" font-size="12" fill="#0b0b0b" text-anchor="middle">libtorch-neuronx-lite</text>
+<text x="618.0" y="44" font-size="14" font-weight="600" fill="#0b0b0b" text-anchor="middle">SGLang</text>
+<rect x="504" y="60" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="618.0" y="87.0" font-size="12" fill="#0b0b0b" text-anchor="middle">SGLang 43881a7 (scheduler, API)</text>
+<rect x="504" y="114" width="228" height="46" rx="4" fill="#2a78d6" stroke="#898781" stroke-width="1"/>
+<text x="618.0" y="141.0" font-size="12" fill="#ffffff" text-anchor="middle">sglang-neuron + models/muse_glimmer</text>
+<rect x="504" y="168" width="228" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="618.0" y="195.0" font-size="12" fill="#0b0b0b" text-anchor="middle">TorchNeuron (torch-neuronx)</text>
+<rect x="24" y="222" width="708" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="378.0" y="249.0" font-size="12" fill="#0b0b0b" text-anchor="middle">Neuron compiler (neuronx-cc) and runtime, NEFF programs</text>
+<rect x="24" y="276" width="708" height="46" rx="4" fill="#ffffff" stroke="#898781" stroke-width="1"/>
+<text x="378.0" y="303.0" font-size="12" fill="#0b0b0b" text-anchor="middle">AWS Trainium (trn2, trn3)</text>
+</svg>
