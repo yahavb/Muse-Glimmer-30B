@@ -103,7 +103,7 @@ spec:
                 --tp-size "$TP_DEGREE" --context-length "$CONTEXT_LENGTH" --chunked-prefill-size "$CHUNK" \
                 --max-running-requests "$MAX_RUNNING" --mem-fraction-static "$MEM_FRACTION" \
                 --reasoning-parser muse --default-chat-template-kwargs '{"reasoning_strength": "low"}' \
-                > >(tee /tmp/sglang_server.log) 2>&1 &
+                ${EXTRA_SERVER_ARGS:-} > >(tee /tmp/sglang_server.log) 2>&1 &
               SERVER=$!
               for _ in $(seq 1 720); do  # up to 2h for compile
                 curl -sf http://127.0.0.1:30000/health >/dev/null 2>&1 && break
@@ -179,6 +179,9 @@ spec:
               value: "4"
             - name: KEEP_ALIVE_S
               value: "3600"
+            # more launch flags (A/B experiments), e.g. "--max-total-tokens 16384" (the vLLM job's 512 blocks x 32)
+            - name: EXTRA_SERVER_ARGS
+              value: ""
             - name: CHUNK
               value: "1024"
             - name: MAX_RUNNING
