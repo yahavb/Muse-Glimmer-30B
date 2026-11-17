@@ -8,7 +8,6 @@ Yahav, November 17, 2026
 - **SGLang + sglang-neuron:** decode **6.27 → 44.64 tok/s (7.12×)**, a 256-token answer **41.29 s → 5.95 s**, GSM8K 0.98.
 - **Native PyTorch:** `torch.compile(fullgraph=True)` on the upstream model code, **3.3 → 15.2 tok/s** on trn3 at TP=2,
   with text, image and video.
-
 - **Same model math everywhere.** One plain-PyTorch decoder serves both ports; each stack joins as its framework's own
   plugin package, with vLLM and SGLang themselves unmodified.
 
