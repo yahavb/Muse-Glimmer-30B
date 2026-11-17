@@ -25,8 +25,8 @@ character 144 (both coherent; the gather build and vLLM also differ from each ot
 
 - SGLang's decode is device-bound: one decode program per token, back to back (system trace, rank 0: 161.3 ms per
   execution, 161.3 ms start to start); its 106 collectives take 1.5 ms of it.
-- The decode's cost grows with the KV pool: 305K tokens 6.27 tok/s, 16K tokens 11.18 tok/s, same output. The write
-  that held: the cost is the KV gather, whose cost grows with the pool it reads from (below).
+- The decode's cost grows with the KV pool: 305K tokens 6.27 tok/s, 16K tokens 11.18 tok/s, same output. The cost is
+  the KV page gather, which grows with the pool it reads from (below); the K/V write is not it.
 - The decode device profile (16K pool, sglang-neuron dafe0e1, rank 0, 2 steps of 91 ms) put the KV page gather
   (`self.k_cache[table]`, graph.py) at about 45 ms of GpSimd per step, plus its copies and transposes on the other
   engines: a dynamic DMA of small descriptors. The one-hot matmul over the pool (static reads, one 1 x term per
