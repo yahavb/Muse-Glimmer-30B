@@ -9,7 +9,7 @@ the native PyTorch backend for Trainium, from the public
 
 Full numbers, methods and every failure along the way: [RESULTS.md](RESULTS.md).
 
-**Serving with vLLM and SGLang on Trainium, and how decode got 4-5x faster:** [docs/BLOG.md](docs/BLOG.md).
+**Serving with vLLM and SGLang on Trainium:** [docs/BLOG.md](docs/BLOG.md).
 
 ## The ladder (BF16, TP=2, greedy, 256 new tokens)
 

@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- |
 | vLLM Neuron (`muse-glimmer-30b-vllm-text-job.yaml`) | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
 | SGLang (`muse-glimmer-30b-sglang-job.yaml`) | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
-| vLLM Neuron before the fix (same job, flag off) | 0.390 s | 12.38 tok/s | 20.98 s | 0.96 |
+| vLLM Neuron, our first Muse-Glimmer port (same job, flag off) | 0.390 s | 12.38 tok/s | 20.98 s | 0.96 |
 
 GSM8K: `scripts/gsm8k_openai.py`, the prompts of SGLang's `few_shot_gsm8k` (5-shot, greedy, 512 new tokens) over
 /v1/completions on both servers; 0 invalid answers on every row. On 100 questions one question is 0.01, so the three

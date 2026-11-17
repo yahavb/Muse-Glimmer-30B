@@ -1,26 +1,34 @@
-# Serving Muse-Glimmer-30B on AWS Trainium: Native PyTorch, vLLM and SGLang, and a 4.8× Faster Decode
+# Serving Muse-Glimmer-30B on AWS Trainium with Native PyTorch, vLLM and SGLang
 
 Yahav, November 17, 2026
 
 ## TL;DR
 
-- **vLLM + vllm-neuron:** decode **12.38 → 59.81 tok/s (4.83×)**, a 256-token answer **20.98 s → 4.46 s**, GSM8K 0.96 → 0.95.
-- **SGLang + sglang-neuron:** decode **6.27 → 44.64 tok/s (7.12×)**, a 256-token answer **41.29 s → 5.95 s**, GSM8K 0.98.
-- **Native PyTorch:** `torch.compile(fullgraph=True)` on the upstream model code, **3.3 → 15.2 tok/s** on trn3 at TP=2,
-  with text, image and video.
-- **Same model math everywhere.** One plain-PyTorch decoder serves both ports; each stack joins as its framework's own
-  plugin package, with vLLM and SGLang themselves unmodified.
+Muse-Glimmer-30B serves on Trainium through both major open serving stacks, each with its native Neuron plugin, at
+comparable speed and accuracy (trn2.48xlarge, 2 devices, TP=8, one request, 256-token greedy answer):
 
-All serving numbers are from one trn2.48xlarge, the same 2-device claim, TP=8 and the same clients; every number links
-to the job and log summary that produced it.
+| Stack | Time to first token | Decode | 256-token answer | GSM8K (100) |
+| --- | --- | --- | --- | --- |
+| vLLM + vllm-neuron | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
+| SGLang + sglang-neuron | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+
+- **One model port, two stacks.** The same plain-PyTorch Muse-Glimmer decoder runs in both, each joining as its
+  framework's own plugin package, with vLLM and SGLang themselves unmodified.
+- **One fix, both stacks.** Our first port read the paged KV cache with an indexed gather that is slow on Trainium. A
+  one-hot matmul in its place made decode 4.8× faster on vLLM and 7.1× faster on SGLang, with the same accuracy.
+- **Native PyTorch too.** The upstream Hugging Face code runs on TorchNeuron with `torch.compile(fullgraph=True)`:
+  15.2 tok/s on trn3 at TP=2, with text, image and video.
+
+Both stacks ran on the same node, with the same device claim and the same clients; every number links to the job that
+produced it.
 
 ## Introduction
 
 Muse-Glimmer-30B is a 30B vision-language model: text, image and video in, text out. We run it on AWS Trainium three
-ways, each with the platform's native pieces and no rewrite into a separate inference framework: the Hugging Face
-model code on **TorchNeuron** (native PyTorch for Trainium), **vLLM** through its Neuron plugin `vllm-neuron`, and
-**SGLang** through its Neuron plugin `sglang-neuron`. On the two serving stacks one change to how attention reads the
-paged KV cache made decode 4.8-7.1× faster with the same accuracy.
+ways, each with the platform's native pieces: the Hugging Face model code on **TorchNeuron** (native PyTorch for
+Trainium), **vLLM** through its Neuron plugin `vllm-neuron`, and **SGLang** through its Neuron plugin `sglang-neuron`.
+This post shows how each path works, how we found the one bottleneck our model port had on both serving stacks, and
+how to reproduce every number.
 
 ## How it works
 
@@ -125,7 +133,8 @@ before an editable install, or both copies register SGLang hooks.
 
 ## 3. Finding the bottleneck
 
-On the first fair run, vLLM decoded at 12.38 tok/s and SGLang at 6.27 tok/s, though both ran the same decoder math.
+Our first port decoded at 12.38 tok/s on vLLM and 6.27 tok/s on SGLang. Both stacks ran the same Muse-Glimmer decoder
+code, so we profiled that code rather than the stacks.
 
 **The device was busy the whole time.** We captured SGLang's system trace with `/start_profile` (activity `NEURON`).
 It showed one decode program per token, running back to back: 161.3 ms per execution, 161.3 ms start to start, with
@@ -165,7 +174,7 @@ SGLang, cumulative (trn2, TP=8; [results](../results/sglang-text-trn2/README.md)
 
 | Configuration | Time to first token | Decode | 256-token answer | GSM8K (100) |
 | --- | --- | --- | --- | --- |
-| first port, default pool (305K tokens) | 0.642 s | 6.27 tok/s | 41.29 s | not run |
+| our first Muse-Glimmer port, default pool (305K tokens) | 0.642 s | 6.27 tok/s | 41.29 s | not run |
 | + KV pool of 16,384 tokens | 0.428 s | 11.18 tok/s | 23.24 s | 0.97\* |
 | **+ one-hot KV gather** | **0.241 s** | **44.64 tok/s** | **5.95 s** | **0.98** |
 
@@ -173,7 +182,7 @@ vLLM (same node and settings):
 
 | Configuration | Time to first token | Decode | 256-token answer | GSM8K (100) |
 | --- | --- | --- | --- | --- |
-| contrib model as shipped | 0.390 s | 12.38 tok/s | 20.98 s | 0.96 |
+| our first Muse-Glimmer port | 0.390 s | 12.38 tok/s | 20.98 s | 0.96 |
 | **+ one-hot KV gather** | **0.193 s** | **59.81 tok/s** | **4.46 s** | **0.95** |
 
 \* measured with SGLang's own `python3 -m sglang.test.few_shot_gsm8k` (same prompts, native `/generate`). The one-hot
@@ -186,8 +195,8 @@ reason; we did not profile the prefill separately.
 
 ![Decode speed of Muse-Glimmer-30B text on trn2 at TP=8, before and with the one-hot KV gather](figures/decode-speed-trn2.svg)
 
-**Figure 2.** Decode tokens per second for one request with a 256-token greedy answer, trn2, TP=8 on 2 devices (LNC2).
-vLLM 12.38 → 59.81, SGLang 6.27 → 44.64.
+**Figure 2.** Decode tokens per second of our Muse-Glimmer port, first version and with the one-hot KV gather, one
+request with a 256-token greedy answer, trn2, TP=8 on 2 devices (LNC2). vLLM 12.38 → 59.81, SGLang 6.27 → 44.64.
 
 | Server (both with the one-hot gather) | Time to first token | Decode | 256-token answer | GSM8K (100) |
 | --- | --- | --- | --- | --- |
@@ -203,7 +212,7 @@ character 144, and vLLM and SGLang differ from each other from character 317. Al
 
 | Idea | Result | Why we dropped it |
 | --- | --- | --- |
-| `--model-type=transformer` (what vLLM compiles with) | 6.16 vs 6.27 tok/s | no gain, and greedy repeats stopped matching |
+| `--model-type=transformer` (vLLM's compile setting) on SGLang | 6.16 vs 6.27 tok/s | no gain, and greedy repeats stopped matching |
 | K/V write as rows of a `[slots, d]` view | 6.25 (big pool), 11.11 (16K) tok/s | no change; warm-up's in-place check showed the write was not copied |
 | gather pages with `index_select` on `[pages, page*d]` | 10.92 vs 11.18 tok/s | still a dynamic gather |
 | attend over the whole pool, mask by the block table's inverse | 50.25 tok/s | the answer depended on where a request's pages sat in the pool |
