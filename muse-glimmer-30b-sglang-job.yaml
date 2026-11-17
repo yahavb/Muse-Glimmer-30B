@@ -179,9 +179,10 @@ spec:
               value: "4"
             - name: KEEP_ALIVE_S
               value: "3600"
-            # more launch flags (A/B experiments), e.g. "--max-total-tokens 16384" (the vLLM job's 512 blocks x 32)
+            # KV pool of 16,384 tokens, the vLLM job's (512 blocks x 32). The decode's cost grows with the pool: 305K
+            # tokens (the default from --mem-fraction-static) 6.27 tok/s, 16K 11.18 tok/s, same answers (trn2, TP=8)
             - name: EXTRA_SERVER_ARGS
-              value: ""
+              value: "--max-total-tokens 16384"
             - name: CHUNK
               value: "1024"
             - name: MAX_RUNNING
