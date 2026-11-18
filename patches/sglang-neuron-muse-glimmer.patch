@@ -130,10 +130,10 @@ index 0000000..f7f15c2
 +    )
 diff --git a/sglang_neuron/models/muse_glimmer/graph.py b/sglang_neuron/models/muse_glimmer/graph.py
 new file mode 100644
-index 0000000..563cd43
+index 0000000..214137b
 --- /dev/null
 +++ b/sglang_neuron/models/muse_glimmer/graph.py
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,457 @@
 +# SPDX-License-Identifier: Apache-2.0
 +"""The Muse-Glimmer text decoder as the runtime's role graphs (one class, ``phase`` prefill or decode), on attention
 +TP, in plain PyTorch: the same math as the validated vLLM Neuron port (vllm-neuron contrib/models/muse_glimmer,
@@ -180,6 +180,12 @@ index 0000000..563cd43
 +# block table's inverse, instead of gathering its pages (profile: the gather is ~45 ms of a 91 ms step at a 16K pool).
 +# Same keys and values; the softmax sums over the pool in another order. Off: the gather. Prefill keeps the gather.
 +DENSE_DECODE = os.environ.get("MUSE_GLIMMER_DENSE_DECODE", "0") == "1"
++# MUSE_GLIMMER_TKG_ATTN=1: the decode's attention through nkilib's attention_block_tkg (the platform's dense decode
++# kernel, ops/attention/attention_decode_paged): QKV projection, the weight-less Q/K RMSNorm, RoPE (none on the NoPE
++# layers), attention over the row's pages masked by position (a sliding layer's window by swa_start_pos_ids) and the
++# K/V write in place, one call per layer. The output gate and o_proj stay here (W_out=None). Not bit-exact (the kernel's
++# own precision). Off: the plain-PyTorch decode. Prefill keeps its path.
++TKG_ATTN = os.environ.get("MUSE_GLIMMER_TKG_ATTN", "0") == "1"
 +# the decoder's prefix in the multimodal checkpoint (HF MuseGlimmerForConditionalGeneration)
 +SRC = "model.language_model"
 +
@@ -246,9 +252,31 @@ index 0000000..563cd43
 +        set_weight_loader(self.o_weight, weights.row_parallel_loader(q))
 +        # the decode graph's attention over the whole pool (MUSE_GLIMMER_DENSE_DECODE; set by the graph)
 +        self.dense_decode = False
++        # the decode graph's nkilib attention (MUSE_GLIMMER_TKG_ATTN; set by the graph)
++        self.tkg_decode = False
 +        # bound by bind_kv_cache: [pages, kv_heads, page, d] each
 +        self.k_cache = None
 +        self.v_cache = None
++
++    def tkg(self, x, cos_half, sin_half, inputs, swa_start):
++        """MUSE_GLIMMER_TKG_ATTN: one decode step (one token a row) of this layer through nkilib attention_block_tkg;
++        returns the layer's attention output, all-reduced over the attention TP."""
++        from sglang_neuron.backend.stack import wrap_nki
++        from sglang_neuron.utils.hardware_config import get_logical_nc_config
++
++        nq, D = self.num_heads, self.head_dim
++        B = x.shape[0]
++        ones = torch.ones(1, D, dtype=DTYPE, device=x.device)
++        rope = self.use_rope
++        out, _, _ = wrap_nki(_tkg_attention)[get_logical_nc_config()](
++            x.unsqueeze(1), self.qkv_weight, ones, ones, self.eps,
++            cos_half if rope else None, sin_half if rope else None,
++            inputs.table.view(B, -1), self.k_cache, self.v_cache, inputs.active_mask, inputs.update_idx,
++            inputs.pos_ids, inputs.max_context, float(self.q_scale),
++            swa_start if self.sliding_window is not None else None)
++        attn = out.reshape(B, nq, D).reshape(B, nq * D).to(DTYPE)  # [B, q_heads, d_head, 1] -> [B, nq * D]
++        out = (attn * torch.sigmoid(x @ self.gate_weight)) @ self.o_weight
++        return neuron_collectives.all_reduce(self.attn_tp_group, out)
 +
 +    def forward(self, x, positions, cos, sin, md):
 +        """``x`` [T, H] of B rows of S tokens each: a prefill is one request's chunk (B 1), a decode one token a row
@@ -373,6 +401,34 @@ index 0000000..563cd43
 +            self.v_cache[slots // bs, :, slots % bs] = v.to(self.v_cache.dtype)
 +
 +
++try:
++    import nki as _nki
++except ImportError:  # CPU-only environments
++    _nki = None
++
++
++def _tkg_attention_impl(X, W_qkv, q_norm, k_norm, norm_eps, cos, sin, active_blocks_table, K_cache, V_cache,
++                        attention_mask, kv_cache_update_idx, pos_ids, max_context_len, softmax_scale, swa_start_pos_ids):
++    from nkilib.core.utils.common_types import QuantizationType
++    from nkilib.experimental.transformer.attention_block_tkg import attention_block_tkg
++
++    return attention_block_tkg(
++        X=X, X_hidden_dim_actual=None, rmsnorm_X_enabled=False, rmsnorm_X_eps=None, rmsnorm_X_gamma=None,
++        W_qkv=W_qkv, bias_qkv=None, quantization_type_qkv=QuantizationType.NONE, weight_dequant_scale_qkv=None,
++        input_dequant_scale_qkv=None, rmsnorm_QK_pre_rope_enabled=True, rmsnorm_QK_pre_rope_eps=norm_eps,
++        rmsnorm_QK_pre_rope_W_Q=q_norm, rmsnorm_QK_pre_rope_W_K=k_norm, cos=cos, sin=sin, rope_contiguous_layout=True,
++        rmsnorm_QK_post_rope_enabled=False, rmsnorm_QK_post_rope_eps=0.0, rmsnorm_QK_post_rope_W_Q=None,
++        rmsnorm_QK_post_rope_W_K=None, K_cache_transposed=False, active_blocks_table=active_blocks_table,
++        K_cache=K_cache, V_cache=V_cache, attention_mask=attention_mask, sink=None, update_cache=True,
++        kv_cache_update_idx=kv_cache_update_idx, W_out=None, bias_out=None, quantization_type_out=QuantizationType.NONE,
++        weight_dequant_scale_out=None, input_dequant_scale_out=None, transposed_out=False, out_in_sb=False,
++        softmax_scale=softmax_scale, pos_ids=pos_ids, swa_start_pos_ids=swa_start_pos_ids,
++        max_context_len=max_context_len)
++
++
++_tkg_attention = _nki.jit(_tkg_attention_impl) if _nki is not None else None
++
++
 +def _rope(x, cos, sin):
 +    """x [T, N, D]; cos / sin [T, D]; rotate-half, as HF apply_rotary_pos_emb."""
 +    half = x.shape[-1] // 2
@@ -432,6 +488,7 @@ index 0000000..563cd43
 +        self.layers = nn.ModuleList([DecoderLayer(config, i) for i in range(config.num_hidden_layers)])
 +        for layer in self.layers:
 +            layer.self_attn.dense_decode = DENSE_DECODE and phase == "decode"
++            layer.self_attn.tkg_decode = TKG_ATTN and phase == "decode"
 +        self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
 +        self.lm_head = ColumnParallelLinear(config.hidden_size, config.vocab_size, dtype=DTYPE, gather_output=True,
 +                                            tp_group=group.device_group)
@@ -456,6 +513,30 @@ index 0000000..563cd43
 +        h = self.embed_tokens(input_ids, scatter_tokens=False, rank=rank)
 +        h = _rms(h, self.config.rms_norm_eps).to(h.dtype)
 +        cos, sin = self._rope_tables(positions)
++        if self.phase == "decode" and TKG_ATTN:
++            from sglang_neuron.ops.attention.attention_decode_paged import paged_decode_inputs
++
++            if self.layers[0].self_attn.num_kv_heads != 1:
++                raise ValueError("MUSE_GLIMMER_TKG_ATTN reads one KV head a rank (an attention TP of at least the KV heads)")
++            full = next(l.self_attn.name for l in self.layers if l.self_attn.sliding_window is None)
++            fmd = attn_metadata[full]
++            a0 = self.layers[0].self_attn
++            # every layer reads the full layers' table (positions from table index); a sliding layer masks its window
++            inputs = paged_decode_inputs(fmd["block_table_tensor"], fmd["slot_mapping"].reshape(-1), positions,
++                                         kv_heads=1, q_heads=a0.num_heads, page=fmd["block_size"])
++            half = self.config.head_dim // 2
++            cos_h = cos[:, :half].t().unsqueeze(-1).contiguous()
++            sin_h = sin[:, :half].t().unsqueeze(-1).contiguous()
++            window = self.config.sliding_window
++            swa_start = torch.clamp(inputs.pos_ids - (window - 1), min=0.0)
++            for layer in self.layers:
++                a = layer.self_attn
++                h = h + layer.post_attention_layernorm(a.tkg(layer.input_layernorm(h), cos_h, sin_h, inputs, swa_start))
++                h = h + layer.post_feedforward_layernorm(layer.mlp(layer.pre_feedforward_layernorm(h)))
++            h = self.norm(h.index_select(0, sampling_positions))
++            logits = self.lm_head(h)
++            cap = self.config.logit_cap
++            return (torch.tanh(logits.float() * (self.config.output_multiplier / cap)) * cap).to(logits.dtype)
 +        for layer in self.layers:
 +            h = layer(h, positions, cos, sin, attn_metadata[layer.self_attn.name])
 +        h = self.norm(h.index_select(0, sampling_positions))

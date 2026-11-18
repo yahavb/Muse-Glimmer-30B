@@ -1,21 +1,26 @@
 # Serving Muse-Glimmer-30B on AWS Trainium with Native PyTorch, vLLM and SGLang
 
-Yahav, November 17, 2026
+Yahav, November 18, 2026
 
 ## TL;DR
 
-Muse-Glimmer-30B serves on Trainium through both major open serving stacks, each with its native Neuron plugin, at
-comparable speed and accuracy (trn2.48xlarge, 2 devices, TP=8, one request, 256-token greedy answer):
+Muse-Glimmer-30B serves on Trainium through both major open serving stacks, each with its native Neuron plugin
+(trn2.48xlarge, 2 devices, TP=8, one request, 256-token greedy answer):
 
 | Stack | Time to first token | Decode | 256-token answer | GSM8K (100) |
 | --- | --- | --- | --- | --- |
-| vLLM + vllm-neuron | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
-| SGLang + sglang-neuron | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| vLLM + vllm-neuron (one-hot KV gather) | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
+| SGLang + sglang-neuron (one-hot KV gather) | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| **SGLang + sglang-neuron (nkilib decode attention kernel)** | **0.209 s** | **69.61 tok/s** | **3.87 s** | **0.99** |
 
 - **One model port, two stacks.** The same plain-PyTorch Muse-Glimmer decoder runs in both, each joining as its
   framework's own plugin package, with vLLM and SGLang themselves unmodified.
 - **One fix, both stacks.** Our first port read the paged KV cache with an indexed gather that is slow on Trainium. A
   one-hot matmul in its place made decode 4.8× faster on vLLM and 7.1× faster on SGLang, with the same accuracy.
+- **One kernel, 56% more on SGLang.** The same decoder code ran 25% slower on SGLang than on vLLM. A device profile
+  found that its K/V write copied each layer's 2 MB cache slice to store one token. Moving the decode attention to
+  nkilib's `attention_block_tkg` kernel, which writes one slot in place, made SGLang 16% faster than vLLM on decode
+  (69.61 against 59.81 tok/s), with GSM8K at 0.99. The vLLM port does not use the kernel yet.
 - **Native PyTorch too.** The upstream Hugging Face code runs on TorchNeuron with `torch.compile(fullgraph=True)`:
   15.2 tok/s on trn3 at TP=2, with text, image and video.
 
@@ -27,8 +32,7 @@ produced it.
 Muse-Glimmer-30B is a 30B vision-language model: text, image and video in, text out. We run it on AWS Trainium three
 ways, each with the platform's native pieces: the Hugging Face model code on **TorchNeuron** (native PyTorch for
 Trainium), **vLLM** through its Neuron plugin `vllm-neuron`, and **SGLang** through its Neuron plugin `sglang-neuron`.
-This post shows how each path works, how we found the one bottleneck our model port had on both serving stacks, and
-how to reproduce every number.
+This post shows how each path works, how we found the bottlenecks in our model port, and how to reproduce every number.
 
 ## How it works
 
@@ -191,49 +195,112 @@ build scored 0.98 on both clients.
 The time to first token also halved. The prefill reads its cached prefix through the same gather, which is the likely
 reason; we did not profile the prefill separately.
 
-## 5. End-to-end results
+## 5. The decode attention kernel (SGLang)
+
+With the one-hot gather in both ports, the same decoder code still decoded 25% slower on SGLang (44.64 tok/s) than on
+vLLM (59.81 tok/s). We profiled SGLang's decode again to find out why.
+
+**Where the time went.** One decode step took 22.9 ms on the device, back to back with the next, so the host was not
+the limit. Splitting one step's instructions by source line (rank 0, one physical core):
+
+| Where | Time per step |
+| --- | --- |
+| MLP weight matmuls | 5.6 ms |
+| semaphore waits (no source line) | 3.4 ms |
+| K/V cache write | 2.4 ms |
+| one-hot gather | 1.8 ms |
+| compiler transposes | 1.1 ms |
+
+The K/V write was the surprise. `k_cache[slots // bs, :, slots % bs] = k` stores one token per layer, but the
+compiled program copied the layer's whole 2 MB cache slice out and back for each of K and V (DMAs of 32 x 64 KB on
+GpSimd's software queue). Each physical core moved 4.6 GB per step, against 3.4 GB for its share of the weights.
+
+**The fix.** sglang-neuron already runs its dense models' decode through nkilib's `attention_block_tkg`: one kernel
+call per layer for the QKV projection, the Q/K RMSNorm, RoPE, attention over the row's pages, and a K/V write of one
+slot in place. Muse-Glimmer fits it with three choices:
+
+- the Q/K norm is weight-less, so both gammas are ones and the softmax scale (`3.87 / sqrt(128)`) is the kernel's
+  `softmax_scale`;
+- the NoPE layers pass no RoPE tables, and the sliding layers mask their window with `swa_start_pos_ids`;
+- the kernel returns the attention without its output projection (`W_out=None`), so the gate
+  (`attn * sigmoid(gate_proj(x))`) and `o_proj` stay in PyTorch.
+
+It is opt-in (`MUSE_GLIMMER_TKG_ATTN=1`, sglang-neuron
+[266a248](https://github.com/yahavb/sglang-neuron/commit/266a248)). After it, a step takes 14.6 ms and each physical
+core moves 3.4 GB, about the weights alone. The kernel computes in its own precision, so it is not bit-exact. The
+known-answer prompts are unchanged, the free-text answer reads coherently and is identical over four runs, and GSM8K
+went from 0.98 to 0.99.
+
+With the kernel in, compiling with `--model-type=transformer` (vLLM Neuron's setting) adds 5% with byte-identical
+answers. On the first port this setting showed no gain (section 7), because the gather hid it.
+
+SGLang, cumulative (same node and settings):
+
+| Configuration | Time to first token | Decode | 256-token answer | GSM8K (100) |
+| --- | --- | --- | --- | --- |
+| one-hot KV gather (section 4) | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| + `MUSE_GLIMMER_TKG_ATTN=1` | 0.217 s | 66.40 tok/s | 4.06 s | 0.98 |
+| **+ `--model-type=transformer`** | **0.209 s** | **69.61 tok/s** | **3.87 s** | **0.99** |
+
+## 6. End-to-end results
 
 ![Decode speed of Muse-Glimmer-30B text on trn2 at TP=8, before and with the one-hot KV gather](figures/decode-speed-trn2.svg)
 
 **Figure 2.** Decode tokens per second of our Muse-Glimmer port, first version and with the one-hot KV gather, one
 request with a 256-token greedy answer, trn2, TP=8 on 2 devices (LNC2). vLLM 12.38 → 59.81, SGLang 6.27 → 44.64.
 
-| Server (both with the one-hot gather) | Time to first token | Decode | 256-token answer | GSM8K (100) |
+| Server | Time to first token | Decode | 256-token answer | GSM8K (100) |
 | --- | --- | --- | --- | --- |
-| vLLM + vllm-neuron | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
-| SGLang + sglang-neuron | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| vLLM + vllm-neuron, one-hot gather | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
+| SGLang + sglang-neuron, one-hot gather | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| SGLang + sglang-neuron, decode attention kernel | 0.209 s | 69.61 tok/s | 3.87 s | 0.99 |
 
-Accuracy held. The known-answer prompts are identical on every build. GSM8K stays between 0.95 and 0.98, where one
+SGLang with the kernel decodes 16% faster than vLLM and answers 13% sooner. The vLLM port still runs the plain-PyTorch
+attention, so this compares the two ports as they are, not the two stacks at their best.
+
+Accuracy held. The known-answer prompts are identical on every build. GSM8K stays between 0.95 and 0.99, where one
 question is 0.01. Every kept build gives the same answer to the same prompt on each of four runs. Long answers do not
 match byte for byte across builds and stacks. The one-hot build's reasoning differs from the gather build's from
-character 144, and vLLM and SGLang differ from each other from character 317. All of them read coherently.
+character 144, and vLLM and SGLang differ from each other from character 317; the kernel build's differs again. All of
+them read coherently.
 
-## 6. What did not work
+## 7. What did not work
 
 | Idea | Result | Why we dropped it |
 | --- | --- | --- |
-| `--model-type=transformer` (vLLM's compile setting) on SGLang | 6.16 vs 6.27 tok/s | no gain, and greedy repeats stopped matching |
+| `--model-type=transformer` (vLLM's compile setting) on SGLang's first port | 6.16 vs 6.27 tok/s | no gain, and greedy repeats stopped matching (it helps once the gather is fixed, section 5) |
 | K/V write as rows of a `[slots, d]` view | 6.25 (big pool), 11.11 (16K) tok/s | no change; warm-up's in-place check showed the write was not copied |
 | gather pages with `index_select` on `[pages, page*d]` | 10.92 vs 11.18 tok/s | still a dynamic gather |
 | attend over the whole pool, mask by the block table's inverse | 50.25 tok/s | the answer depended on where a request's pages sat in the pool |
+| static DMA for the weights (`--internal-disable-dge-levels=io`), one-hot build with the transformer model type | 37.62 vs 45.68 tok/s | slower |
+| GQA as one matmul, masks built once per step, fused QKV and gate weights | 45.20 vs 44.64 tok/s | small, and the answer changed |
 
 The last one was the fastest. It summed the softmax in pool order, so the first run of a prompt and a run that reused
 cached prefix pages gave different text. The one-hot gather keeps the token order and gives up 11% of that speed.
 
-## 7. Future directions
+## 8. Future directions
 
+- **The MLP weight stream.** After the kernel, the MLP's weight matmuls are the largest cost (gate_up 2.6 ms and
+  down 1.7 ms of a 14.6 ms step). Their weights load through software-generated DMA on GpSimd, which is still the
+  busiest engine (6.5 ms). nkilib's MLP decode kernel is the next candidate.
+- **The kernel on vLLM.** The vLLM port could run the same `attention_block_tkg` call.
 - **Image and video on SGLang.** sglang-neuron's graphs need an embeddings input and a vision encoder graph first.
 - **Larger batches.** The one-hot gather reads the whole pool every step, so its cost grows with the pool, not the
-  context. That is cheap for a 16K-token pool and one request. Many concurrent requests need a paged attention kernel
-  that reads only the table's pages.
+  context. That is cheap for a 16K-token pool and one request. The kernel path reads only the table's pages; it is
+  measured here at one request only.
 - **Accuracy at full scale.** GSM8K on all 1,319 questions would separate the servers beyond 100 questions.
 
-## 8. Takeaways
+## 9. Takeaways
 
 - Profile before you optimize. The system trace ruled out host overhead and collectives in one capture, and the device
   profile named the single source line.
 - On Trainium, gathers through a runtime index are expensive. When the source is small, a one-hot matmul over the whole
   source swaps irregular DMA for sequential reads and spare tensor-engine work, and stays exact.
+- A one-token write can cost a whole-buffer copy. Read the DMA sizes in the profile, not just the source line.
+- Reuse the platform's kernels. The decode kernel the plugin already ran for other models fit Muse-Glimmer with its
+  own norm, gate and NoPE layers handled outside or by its options.
+- Retest a refuted idea after the bottleneck moves. The transformer model type showed nothing behind the gather and
+  5% after it.
 - Size the KV pool to the workload. A pool sized to "all free memory" made every decode step pay for memory it never
   used.
 - Keep a change only if the answers hold: greedy repeats, known answers and a benchmark, on the same node and client
@@ -248,7 +315,7 @@ cached prefix pages gave different text. The one-hot gather keeps the token orde
 | Instance | trn2.48xlarge, 2 devices (LNC2, 8 logical cores), TP=8 | same |
 | Image | `public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.0-ubuntu26.04` | `public.ecr.aws/neuron/pytorch-inference-sglang-neuron:v0.1.0-neuron-py314-sdk-2.33.0-ubuntu26.04` |
 | Neuron SDK | 2.33 | 2.33 (neuronx-cc 2.28.7631, torch-neuronx 2.14.3) |
-| Framework | vllm-neuron branch `muse-glimmer-30b` (fb32962b, vLLM 0.32) + the one-hot patch | SGLang 43881a7, sglang-neuron fork `muse-glimmer-text` (f607a28) |
+| Framework | vllm-neuron branch `muse-glimmer-30b` (fb32962b, vLLM 0.32) + the one-hot patch | SGLang 43881a7, sglang-neuron fork `muse-glimmer-text` (266a248) |
 | Kubernetes job | [`muse-glimmer-30b-vllm-text-job.yaml`](../muse-glimmer-30b-vllm-text-job.yaml) | [`muse-glimmer-30b-sglang-job.yaml`](../muse-glimmer-30b-sglang-job.yaml) |
 
 **vLLM**
@@ -272,7 +339,8 @@ vllm serve meta-models/Muse-Glimmer-30B --served-model-name Muse-Glimmer-30B \
 git clone -b muse-glimmer-text https://github.com/yahavb/sglang-neuron && cd sglang-neuron
 pip uninstall -y sglang-neuron && pip install --no-deps --no-build-isolation -e .
 
-export SGLANG_PLATFORM=neuron MUSE_GLIMMER_KV_ONEHOT_GATHER=1
+export SGLANG_PLATFORM=neuron MUSE_GLIMMER_KV_ONEHOT_GATHER=1 MUSE_GLIMMER_TKG_ATTN=1 \
+  MUSE_GLIMMER_NEURON_MODEL_TYPE=transformer
 python3 -m sglang.launch_server --model-path meta-models/Muse-Glimmer-30B --served-model-name Muse-Glimmer-30B \
   --language-model-only --host 127.0.0.1 --port 30000 --tp-size 8 --context-length 2048 \
   --chunked-prefill-size 1024 --max-running-requests 1 --max-total-tokens 16384 --mem-fraction-static 0.6 \
@@ -294,9 +362,11 @@ curl -X POST http://127.0.0.1:30000/start_profile -H 'Content-Type: application/
   -d '{"activities": ["NEURON"], "output_dir": "/tmp/profile"}'
 # ... one request ...
 curl -X POST http://127.0.0.1:30000/stop_profile
-# device profile of two decode steps on rank 0, set at launch
-export SGLANG_NEURON_PROFILE_SERVE_RANKS=0 SGLANG_NEURON_PROFILE_SERVE_START=16 SGLANG_NEURON_PROFILE_SERVE_STEPS=2
+# device profile of decode steps on rank 0, set at launch
+export SGLANG_NEURON_PROFILE_SERVE_RANKS=0 SGLANG_NEURON_PROFILE_SERVE_START=16 SGLANG_NEURON_PROFILE_SERVE_STEPS=4
 neuron-explorer view -n <decode.neff> -s <profile.ntff> --output-format summary-json
+# instruction table (per engine, source line, DMA queue) for the breakdowns above
+neuron-explorer view -n <decode.neff> -s <profile.ntff> --output-format parquet --output-file pq --ignore-event-trace
 ```
 
 ## Acknowledgments
