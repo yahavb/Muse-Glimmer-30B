@@ -1,17 +1,32 @@
 # Muse-Glimmer-30B text serving on trn2: SGLang (sglang-neuron) vs vLLM Neuron
 
-## Current (2026-11-17, Muse repo 61ba8e2, one job each, same node, both with the one-hot KV gather)
+## Current (2026-11-18, sglang-neuron 266a248, Muse job defaults, same node and settings as below)
 
 | Server | Time to first token | Decode | 256-token answer | GSM8K (100 questions) |
 | --- | --- | --- | --- | --- |
-| vLLM Neuron (`muse-glimmer-30b-vllm-text-job.yaml`) | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
-| SGLang (`muse-glimmer-30b-sglang-job.yaml`) | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
-| vLLM Neuron, our first Muse-Glimmer port (same job, flag off) | 0.390 s | 12.38 tok/s | 20.98 s | 0.96 |
+| SGLang + `MUSE_GLIMMER_TKG_ATTN=1` + `MUSE_GLIMMER_NEURON_MODEL_TYPE=transformer` (`muse-glimmer-30b-sglang-job.yaml`) | 0.209 s | 69.61 tok/s | 3.87 s | 0.99 |
+| SGLang + `MUSE_GLIMMER_TKG_ATTN=1` | 0.217 s | 66.40 tok/s | 4.06 s | 0.98 |
+| SGLang, one-hot KV gather only (2026-11-17 default) | 0.241 s | 44.64 tok/s | 5.95 s | 0.98 |
+| vLLM Neuron (`muse-glimmer-30b-vllm-text-job.yaml`, one-hot KV gather) | 0.193 s | 59.81 tok/s | 4.46 s | 0.95 |
 
-GSM8K: `scripts/gsm8k_openai.py`, the prompts of SGLang's `few_shot_gsm8k` (5-shot, greedy, 512 new tokens) over
-/v1/completions on both servers; 0 invalid answers on every row. On 100 questions one question is 0.01, so the three
-scores are within a few questions of each other. vLLM's fix is the same one-hot gather in its contrib model
-(`MUSE_GLIMMER_KV_ONEHOT_GATHER=1`; the model file comes from a cluster ConfigMap, `MODEL_OVERRIDE=1`).
+SGLang decodes 16% faster than vLLM (69.61 vs 59.81 tok/s) and answers 13% sooner (3.87 vs 4.46 s). Spread over the 3
+warm runs 0.01 tok/s; the free-text answer is identical over 4 runs and coherent (it differs from the one-hot-only
+build's: the kernel computes attention in its own precision). The two known-answer prompts are unchanged.
+
+What changed (device profile, rank 0, one decode step, sglang-neuron's serve-window profile):
+- Before: 22.9 ms per step. The K/V index write (`k_cache[slots // bs, :, slots % bs] = k`) copied each 2 MB cache
+  slice out and back per layer (2.4 ms per step), the one-hot gather and its transposes took 2.8 ms, and each physical
+  core moved 4.6 GB per step.
+- `MUSE_GLIMMER_TKG_ATTN=1` runs the decode's attention through nkilib's `attention_block_tkg` (the platform's dense
+  decode kernel): QKV projection, the weight-less Q/K RMSNorm, RoPE, attention over the row's pages (a sliding layer's
+  window by `swa_start_pos_ids`) and a one-slot K/V write in place. The output gate and o_proj stay in torch.
+- After: 14.6 ms per step, 3.4 GB per physical core (about the weights alone). The next cost is the MLP's weight stream
+  (gate_up 2.6 ms, down 1.7 ms per step), loaded by software DGE on GpSimd (GpSimd busy 6.5 ms).
+- `--model-type=transformer` (vLLM Neuron's): 44.64 -> 45.68 tok/s on the one-hot build, byte-identical answers;
+  66.40 -> 69.58 tok/s with the kernel.
+
+Refuted on 2026-11-18: `--internal-disable-dge-levels=io` (static DMA for the weights) 37.62 tok/s against 45.68;
+`hwdge` is not a DGE level of neuronx-cc 2.28.
 
 ## History
 

@@ -197,6 +197,13 @@ spec:
             # tok/s, GSM8K (100 questions) 0.98 against 0.97, deterministic (results/sglang-text-trn2)
             - name: MUSE_GLIMMER_KV_ONEHOT_GATHER
               value: "1"
+            # the decode's attention through nkilib attention_block_tkg (sglang-neuron 266a248): QKV, Q/K norm, RoPE,
+            # paged attention and the K/V write in place, one call per layer; with the transformer model type (vLLM
+            # Neuron's) decode 44.64 -> 69.58 tok/s, GSM8K (100 questions) 0.99 (results/sglang-text-trn2)
+            - name: MUSE_GLIMMER_TKG_ATTN
+              value: "1"
+            - name: MUSE_GLIMMER_NEURON_MODEL_TYPE
+              value: "transformer"
             - name: CHUNK
               value: "1024"
             - name: MAX_RUNNING
